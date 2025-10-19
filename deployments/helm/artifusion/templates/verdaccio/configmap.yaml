@@ -1,0 +1,52 @@
+{{- if .Values.verdaccio.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "artifusion.verdaccio.serviceName" . }}
+  labels:
+    {{- include "artifusion.verdaccio.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    # Verdaccio configuration
+    # Auto-configured by Helm chart
+
+    storage: /verdaccio/storage
+
+    web:
+      enable: true
+      title: "Verdaccio NPM Registry"
+
+    uplinks:
+      npmjs:
+        url: https://registry.npmjs.org/
+        cache: true
+      {{- if .Values.artifusion.config.github.required_org }}
+      github:
+        url: https://npm.pkg.github.com/
+        cache: true
+      {{- end }}
+
+    packages:
+      {{- if .Values.artifusion.config.github.required_org }}
+      '@{{ .Values.artifusion.config.github.required_org }}/*':
+        access: $authenticated
+        publish: $authenticated
+        proxy: github npmjs
+      {{- end }}
+      '@*/*':
+        access: $authenticated
+        publish: $authenticated
+        proxy: npmjs
+      '**':
+        access: $authenticated
+        publish: $authenticated
+        proxy: npmjs
+
+    auth:
+      htpasswd:
+        file: /verdaccio/storage/htpasswd
+        max_users: -1
+
+    logs:
+      - { type: stdout, format: pretty, level: http }
+{{- end }}

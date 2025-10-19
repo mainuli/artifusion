@@ -39,20 +39,34 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  build           - Build the binary"
-	@echo "  test            - Run all tests with race detection"
-	@echo "  test-coverage   - Run tests and generate HTML coverage report"
-	@echo "  lint            - Run linters (vet, fmt check)"
-	@echo "  fmt             - Format code with go fmt"
-	@echo "  vet             - Run go vet"
-	@echo "  clean           - Remove build artifacts"
-	@echo "  docker-build    - Build Docker image"
-	@echo "  docker-up       - Start services with docker-compose"
-	@echo "  docker-down     - Stop services with docker-compose"
-	@echo "  run             - Run the application locally"
-	@echo "  security        - Run security checks"
-	@echo "  deps            - Download and verify dependencies"
-	@echo "  help            - Display this help message"
+	@echo "  Build & Test:"
+	@echo "    build           - Build the binary"
+	@echo "    test            - Run all tests with race detection"
+	@echo "    test-coverage   - Run tests and generate HTML coverage report"
+	@echo "    lint            - Run linters (vet, fmt check)"
+	@echo "    fmt             - Format code with go fmt"
+	@echo "    vet             - Run go vet"
+	@echo "    clean           - Remove build artifacts"
+	@echo ""
+	@echo "  Docker:"
+	@echo "    docker-build    - Build Docker image"
+	@echo "    docker-up       - Start services with docker-compose"
+	@echo "    docker-down     - Stop services with docker-compose"
+	@echo ""
+	@echo "  Helm:"
+	@echo "    helm-lint       - Lint Helm chart"
+	@echo "    helm-template   - Render chart templates"
+	@echo "    helm-package    - Package chart into .tgz"
+	@echo "    helm-push       - Push chart to GHCR"
+	@echo "    helm-install    - Install chart to cluster"
+	@echo "    helm-test       - Run Helm tests"
+	@echo "    helm-all        - Full pipeline (lint/package/push)"
+	@echo ""
+	@echo "  Other:"
+	@echo "    run             - Run the application locally"
+	@echo "    security        - Run security checks"
+	@echo "    deps            - Download and verify dependencies"
+	@echo "    help            - Display this help message"
 
 ## build: Build the binary
 build:
@@ -183,3 +197,117 @@ all: fmt vet test build
 ## ci: Run all CI checks (lint, test, build)
 ci: lint test build
 	@echo "CI checks complete"
+
+# Helm configuration
+HELM_VERSION ?= $(VERSION)
+HELM_CHART_DIR = deployments/helm/artifusion
+HELM_REGISTRY = oci://ghcr.io/mainuli
+HELM_CHART_NAME = artifusion
+GITHUB_USER ?= mainuli
+
+## helm-deps: Check Helm and dependencies
+.PHONY: helm-deps
+helm-deps:
+	@command -v helm >/dev/null 2>&1 || { echo "❌ helm not found, install from https://helm.sh"; exit 1; }
+	@command -v helm-docs >/dev/null 2>&1 || echo "⚠️  helm-docs not found (optional), install: brew install norwoodj/tap/helm-docs"
+	@command -v kubeconform >/dev/null 2>&1 || echo "⚠️  kubeconform not found (optional), install: brew install kubeconform"
+
+## helm-lint: Lint Helm chart with strict validation
+.PHONY: helm-lint
+helm-lint: helm-deps
+	@echo "Linting Helm chart..."
+	helm lint $(HELM_CHART_DIR) --strict
+	@if command -v kubeconform >/dev/null 2>&1; then \
+		echo "Validating templates with kubeconform..."; \
+		helm template test $(HELM_CHART_DIR) | kubeconform -strict -summary; \
+	fi
+
+## helm-template: Render chart templates for inspection
+.PHONY: helm-template
+helm-template: helm-deps
+	helm template $(HELM_CHART_NAME) $(HELM_CHART_DIR) \
+		--namespace artifusion \
+		--values $(HELM_CHART_DIR)/values.yaml
+
+## helm-template-dev: Render with development values
+.PHONY: helm-template-dev
+helm-template-dev: helm-deps
+	helm template $(HELM_CHART_NAME) $(HELM_CHART_DIR) \
+		--values $(HELM_CHART_DIR)/values-dev.yaml
+
+## helm-template-prod: Render with production values
+.PHONY: helm-template-prod
+helm-template-prod: helm-deps
+	helm template $(HELM_CHART_NAME) $(HELM_CHART_DIR) \
+		--values $(HELM_CHART_DIR)/values-prod.yaml
+
+## helm-package: Package chart into .tgz
+.PHONY: helm-package
+helm-package: helm-deps
+	@echo "Packaging Helm chart version $(HELM_VERSION)..."
+	@mkdir -p ./dist
+	helm package $(HELM_CHART_DIR) \
+		--version $(HELM_VERSION) \
+		--app-version $(VERSION) \
+		--destination ./dist
+	@echo "✓ Chart packaged: dist/$(HELM_CHART_NAME)-$(HELM_VERSION).tgz"
+
+## helm-login: Login to GHCR for Helm chart push
+.PHONY: helm-login
+helm-login:
+	@echo "Logging in to GHCR..."
+	@echo "$$GITHUB_TOKEN" | helm registry login ghcr.io -u $(GITHUB_USER) --password-stdin
+
+## helm-push: Push chart to GHCR
+.PHONY: helm-push
+helm-push: helm-package helm-login
+	@echo "Pushing Helm chart to $(HELM_REGISTRY)..."
+	helm push ./dist/$(HELM_CHART_NAME)-$(HELM_VERSION).tgz $(HELM_REGISTRY)
+	@echo "✓ Chart pushed to $(HELM_REGISTRY)/$(HELM_CHART_NAME):$(HELM_VERSION)"
+
+## helm-install: Install chart to current kubectl context
+.PHONY: helm-install
+helm-install: helm-deps
+	helm install $(HELM_CHART_NAME) $(HELM_CHART_DIR) \
+		--namespace artifusion --create-namespace \
+		--values $(HELM_CHART_DIR)/values.yaml
+
+## helm-upgrade: Upgrade existing installation
+.PHONY: helm-upgrade
+helm-upgrade: helm-deps
+	helm upgrade $(HELM_CHART_NAME) $(HELM_CHART_DIR) \
+		--namespace artifusion \
+		--values $(HELM_CHART_DIR)/values.yaml \
+		--wait
+
+## helm-test: Run Helm tests
+.PHONY: helm-test
+helm-test:
+	helm test $(HELM_CHART_NAME) --namespace artifusion
+
+## helm-uninstall: Uninstall chart from cluster
+.PHONY: helm-uninstall
+helm-uninstall:
+	helm uninstall $(HELM_CHART_NAME) --namespace artifusion
+
+## helm-docs: Generate README.md from values.yaml
+.PHONY: helm-docs
+helm-docs:
+	@if command -v helm-docs >/dev/null 2>&1; then \
+		helm-docs $(HELM_CHART_DIR); \
+		echo "✓ Documentation generated"; \
+	else \
+		echo "⚠️  helm-docs not installed, skipping"; \
+	fi
+
+## helm-all: Full pipeline: lint → package → push
+.PHONY: helm-all
+helm-all: helm-lint helm-package helm-push
+	@echo "✓ Helm pipeline complete"
+
+## helm-dry-run: Dry-run install for validation
+.PHONY: helm-dry-run
+helm-dry-run: helm-deps
+	helm install $(HELM_CHART_NAME) $(HELM_CHART_DIR) \
+		--namespace artifusion --create-namespace \
+		--dry-run --debug

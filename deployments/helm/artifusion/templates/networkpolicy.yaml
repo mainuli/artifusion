@@ -1,0 +1,43 @@
+{{- if .Values.networkPolicy.enabled }}
+---
+# Allow Ingress to Artifusion
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifusion.fullname" . }}-ingress-to-artifusion
+  labels:
+    {{- include "artifusion.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artifusion.artifusion.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# Allow Artifusion to all backend services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifusion.fullname" . }}-artifusion-to-backends
+  labels:
+    {{- include "artifusion.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- or (include "artifusion.ociRegistry.selectorLabels" .) (include "artifusion.registry.selectorLabels" .) (include "artifusion.reposilite.selectorLabels" .) (include "artifusion.verdaccio.selectorLabels" .) | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "artifusion.artifusion.selectorLabels" . | nindent 14 }}
+{{- end }}

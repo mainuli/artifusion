@@ -1,0 +1,73 @@
+{{- if .Values.reposilite.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "artifusion.reposilite.serviceName" . }}
+  labels:
+    {{- include "artifusion.reposilite.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "artifusion.reposilite.serviceName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "artifusion.reposilite.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/reposilite/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "artifusion.reposilite.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
+      containers:
+        - name: reposilite
+          image: {{ include "artifusion.reposilite.image" . }}
+          imagePullPolicy: {{ .Values.reposilite.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          {{- if .Values.artifusion.config.github.required_org }}
+          env:
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifusion.reposilite.serviceName" . }}-secret
+                  key: github-token
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /api/status
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.reposilite.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes: []
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ {{ .Values.reposilite.storage.accessMode | quote }} ]
+        {{- if .Values.reposilite.storage.storageClass }}
+        storageClassName: {{ .Values.reposilite.storage.storageClass | quote }}
+        {{- else if .Values.global.storageClass }}
+        storageClassName: {{ .Values.global.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.reposilite.storage.size }}
+{{- end }}

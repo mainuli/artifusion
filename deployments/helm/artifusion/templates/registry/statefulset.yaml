@@ -1,0 +1,74 @@
+{{- if .Values.registry.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "artifusion.registry.serviceName" . }}
+  labels:
+    {{- include "artifusion.registry.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "artifusion.registry.serviceName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "artifusion.registry.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/registry/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "artifusion.registry.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
+      containers:
+        - name: registry
+          image: {{ include "artifusion.registry.image" . }}
+          imagePullPolicy: {{ .Values.registry.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 5000
+              protocol: TCP
+          env:
+            - name: REGISTRY_CONFIG_PATH
+              value: /etc/docker/registry/config.yml
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.registry.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/docker/registry
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "artifusion.registry.serviceName" . }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ {{ .Values.registry.storage.accessMode | quote }} ]
+        {{- if .Values.registry.storage.storageClass }}
+        storageClassName: {{ .Values.registry.storage.storageClass | quote }}
+        {{- else if .Values.global.storageClass }}
+        storageClassName: {{ .Values.global.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.registry.storage.size }}
+{{- end }}

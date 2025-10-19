@@ -1,0 +1,16 @@
+{{- if and .Values.artifusion.enabled .Values.artifusion.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "artifusion.artifusion.serviceName" . }}
+  labels:
+    {{- include "artifusion.artifusion.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "artifusion.artifusion.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: {{ .Values.artifusion.config.metrics.path }}
+      interval: {{ .Values.artifusion.serviceMonitor.interval }}
+{{- end }}

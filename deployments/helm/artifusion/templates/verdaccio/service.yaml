@@ -1,0 +1,18 @@
+{{- if .Values.verdaccio.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "artifusion.verdaccio.serviceName" . }}
+  labels:
+    {{- include "artifusion.verdaccio.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.verdaccio.service.type }}
+  clusterIP: None  # Headless service for StatefulSet
+  ports:
+    - port: {{ .Values.verdaccio.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "artifusion.verdaccio.selectorLabels" . | nindent 4 }}
+{{- end }}

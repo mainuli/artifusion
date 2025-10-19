@@ -1,0 +1,17 @@
+{{- if .Values.registry.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "artifusion.registry.serviceName" . }}
+  labels:
+    {{- include "artifusion.registry.labels" . | nindent 4 }}
+data:
+  config.yml: |
+    version: {{ .Values.registry.config.version }}
+    storage:
+      {{- toYaml .Values.registry.config.storage | nindent 6 }}
+    http:
+      {{- toYaml .Values.registry.config.http | nindent 6 }}
+    health:
+      {{- toYaml .Values.registry.config.health | nindent 6 }}
+{{- end }}

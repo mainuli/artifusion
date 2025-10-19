@@ -1,0 +1,84 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your release is named {{ .Release.Name }}.
+
+Artifusion is a multi-protocol artifact reverse proxy with GitHub authentication.
+
+{{- if .Values.ingress.enabled }}
+
+🌐 Ingress URLs:
+{{- range .Values.ingress.hosts }}
+  {{- range .paths }}
+  - https://{{ .host }}{{ .path }}
+  {{- end }}
+{{- end }}
+
+{{- else }}
+
+To access Artifusion, run these commands:
+
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "artifusion.name" . }},app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=artifusion" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+
+Visit http://127.0.0.1:8080 to access Artifusion.
+
+{{- end }}
+
+📊 Health Endpoints:
+  - Liveness:  /health
+  - Readiness: /ready
+  - Metrics:   /metrics
+
+🔧 Configuration:
+{{- if .Values.artifusion.config.github.required_org }}
+  - GitHub Org: {{ .Values.artifusion.config.github.required_org }}
+  - GitHub Packages: ENABLED (for Maven and NPM)
+{{- else }}
+  - GitHub Org: Not set (allowing any GitHub user)
+  - GitHub Packages: DISABLED
+{{- end }}
+
+📦 Enabled Protocols:
+{{- if .Values.artifusion.config.protocols.oci.enabled }}
+  - OCI/Docker: {{ .Values.artifusion.config.protocols.oci.path_prefix }}
+{{- end }}
+{{- if .Values.artifusion.config.protocols.maven.enabled }}
+  - Maven:      {{ .Values.artifusion.config.protocols.maven.path_prefix }}
+{{- end }}
+{{- if .Values.artifusion.config.protocols.npm.enabled }}
+  - NPM:        {{ .Values.artifusion.config.protocols.npm.path_prefix }}
+{{- end }}
+
+🔐 Authentication:
+Clients must authenticate with GitHub Personal Access Token (PAT):
+  - Docker:  docker login <host> -u <github-username> -p <github-pat>
+  - Maven:   Configure <server> in settings.xml with GitHub credentials
+  - NPM:     npm login --registry=<url>
+
+{{- if not .Values.secrets.github.token }}
+
+⚠️  WARNING: GitHub upstream credentials not configured!
+To enable GitHub Packages and GHCR pull-through cache, set:
+  --set secrets.github.username=<your-github-username>
+  --set secrets.github.token=<ghp_xxx>
+
+{{- end }}
+
+{{- if not .Values.secrets.dockerhub.token }}
+
+💡 TIP: Configure Docker Hub credentials to avoid rate limits:
+  --set secrets.dockerhub.username=<dockerhub-username>
+  --set secrets.dockerhub.token=<dckr_pat_xxx>
+
+{{- end }}
+
+🧪 Test the deployment:
+  helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }}
+
+📚 Documentation:
+  https://github.com/mainuli/artifusion
+
+For more information, visit:
+  - Chart Repository: oci://ghcr.io/mainuli/artifusion
+  - Issues: https://github.com/mainuli/artifusion/issues

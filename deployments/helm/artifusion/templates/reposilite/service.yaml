@@ -1,0 +1,18 @@
+{{- if .Values.reposilite.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "artifusion.reposilite.serviceName" . }}
+  labels:
+    {{- include "artifusion.reposilite.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.reposilite.service.type }}
+  clusterIP: None  # Headless service for StatefulSet
+  ports:
+    - port: {{ .Values.reposilite.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "artifusion.reposilite.selectorLabels" . | nindent 4 }}
+{{- end }}

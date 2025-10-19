@@ -1,0 +1,54 @@
+{{- if .Values.reposilite.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "artifusion.reposilite.serviceName" . }}
+  labels:
+    {{- include "artifusion.reposilite.labels" . | nindent 4 }}
+data:
+  configuration.cdn: |
+    # Reposilite configuration
+    # Auto-configured by Helm chart
+
+    # Hosted repositories
+    repositories {
+      releases {
+        id: "releases"
+        visibility: PUBLIC
+        reposiliteRepository: true
+        storageProvider: fs
+      }
+      snapshots {
+        id: "snapshots"
+        visibility: PUBLIC
+        reposiliteRepository: true
+        storageProvider: fs
+      }
+    }
+
+    # Mirror repositories
+    proxied {
+      maven-central {
+        id: "maven-central"
+        visibility: PUBLIC
+        reposiliteRepository: false
+        proxied: [
+          "https://repo.maven.apache.org/maven2/"
+        ]
+      }
+      {{- if .Values.artifusion.config.github.required_org }}
+      github-packages {
+        id: "github-packages"
+        visibility: PUBLIC
+        reposiliteRepository: false
+        proxied: [
+          "https://maven.pkg.github.com/{{ .Values.artifusion.config.github.required_org }}/*"
+        ]
+        authentication {
+          type: "Bearer"
+          credentials: "${GITHUB_TOKEN}"
+        }
+      }
+      {{- end }}
+    }
+{{- end }}
