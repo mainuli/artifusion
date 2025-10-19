@@ -5,14 +5,18 @@ BINARY_NAME=artifusion
 DOCKER_IMAGE=artifusion:latest
 
 # Version injection
+# VERSION: Git tag or "dev" for local builds (e.g., "1.2.3" or "v1.2.3-5-gabcdef")
+# GIT_COMMIT: Full git commit SHA (e.g., "abc123f456...")
+# BUILD_TIME: ISO 8601 timestamp (e.g., "2025-01-15T10:30:00Z")
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-COMMIT_HASH ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
+GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 # Build flags for optimization and version injection
+# These match the variable names in cmd/artifusion/main.go
 LDFLAGS=-ldflags "-w -s \
 	-X main.version=$(VERSION) \
-	-X main.commit=$(COMMIT_HASH) \
+	-X main.gitCommit=$(GIT_COMMIT) \
 	-X main.buildTime=$(BUILD_TIME)"
 
 # Go commands
@@ -107,7 +111,7 @@ docker-build:
 	@echo "Building Docker image $(DOCKER_IMAGE)..."
 	docker build -t $(DOCKER_IMAGE) \
 		--build-arg VERSION=$(VERSION) \
-		--build-arg COMMIT_HASH=$(COMMIT_HASH) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		--build-arg BUILD_TIME=$(BUILD_TIME) \
 		-f Dockerfile .
 	@echo "Docker image built: $(DOCKER_IMAGE)"

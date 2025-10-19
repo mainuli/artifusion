@@ -27,8 +27,14 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const (
-	version = "1.0.0"
+// Build-time version information
+// These are set via ldflags during build:
+//
+//	go build -ldflags="-X main.version=... -X main.gitCommit=... -X main.buildTime=..."
+var (
+	version   = "dev"     // Version string (e.g., "1.2.3" or "1.2.3-rc.1")
+	gitCommit = "unknown" // Git commit SHA (e.g., "abc123f")
+	buildTime = "unknown" // Build timestamp (e.g., "2025-01-15T10:30:00Z")
 )
 
 func main() {
@@ -73,6 +79,8 @@ func main() {
 
 	logger.Info().
 		Str("version", version).
+		Str("git_commit", gitCommit).
+		Str("build_time", buildTime).
 		Int("port", cfg.Server.Port).
 		Str("log_level", cfg.Logging.Level).
 		Msg("Starting Artifusion")

@@ -2,6 +2,13 @@
 # Using Chainguard Go 1.25 image (distroless)
 FROM cgr.dev/chainguard/go:latest AS builder
 
+# Build arguments for version information
+# These are injected into the binary at build time via ldflags
+# Usage: docker build --build-arg VERSION=1.2.3 --build-arg GIT_COMMIT=$(git rev-parse HEAD) .
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+
 # Chainguard images include ca-certificates and tzdata by default
 # Set Go toolchain to auto (allows using newer Go versions)
 ENV GOTOOLCHAIN=auto
@@ -17,10 +24,14 @@ COPY . .
 
 # Build binary with optimizations for Go 1.25
 # Using CGO_ENABLED=0 for fully static binary
+# Version information is injected via ldflags from build args
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -a \
     -installsuffix cgo \
-    -ldflags="-w -s -X main.version=1.0.0" \
+    -ldflags="-w -s \
+      -X main.version=${VERSION} \
+      -X main.gitCommit=${GIT_COMMIT} \
+      -X main.buildTime=${BUILD_TIME}" \
     -o artifusion \
     ./cmd/artifusion
 
@@ -28,6 +39,21 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Using Chainguard static image - minimal distroless base for static binaries
 # Includes ca-certificates, tzdata, and nonroot user (uid:65532, gid:65532)
 FROM cgr.dev/chainguard/static:latest
+
+# Pass build args to runtime stage for labels
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+
+# OCI Image Specification labels
+# These can be inspected with: docker inspect <image>
+LABEL org.opencontainers.image.title="Artifusion"
+LABEL org.opencontainers.image.description="Multi-protocol reverse proxy with GitHub authentication for artifact registries (OCI, Maven, NPM)"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
+LABEL org.opencontainers.image.created="${BUILD_TIME}"
+LABEL org.opencontainers.image.source="https://github.com/mainuli/artifusion"
+LABEL org.opencontainers.image.licenses="MIT"
 
 WORKDIR /app
 
