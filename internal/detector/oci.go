@@ -6,17 +6,28 @@ import (
 )
 
 // OCIDetector detects OCI/Docker registry protocol requests
-type OCIDetector struct{}
+type OCIDetector struct {
+	host string
+}
 
 // NewOCIDetector creates a new OCI detector
-func NewOCIDetector() *OCIDetector {
-	return &OCIDetector{}
+// host: optional domain for host-based routing (e.g., "docker.example.com")
+func NewOCIDetector(host string) *OCIDetector {
+	return &OCIDetector{host: host}
 }
 
 // Detect checks if the request is an OCI/Docker registry request
 func (d *OCIDetector) Detect(r *http.Request) bool {
-	// Check 1: Path starts with /v2/
-	if strings.HasPrefix(r.URL.Path, "/v2/") {
+	// Check 0: Host matching (if configured)
+	if d.host != "" {
+		requestHost := getRequestHost(r)
+		if requestHost != d.host {
+			return false
+		}
+	}
+
+	// Check 1: OCI spec - path must start with /v2 (includes /v2/ and /v2 exactly)
+	if strings.HasPrefix(r.URL.Path, "/v2/") || r.URL.Path == "/v2" {
 		return true
 	}
 

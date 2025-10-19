@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-
-	"github.com/mainuli/artifusion/internal/utils"
 )
 
 const (
@@ -19,11 +17,10 @@ const (
 )
 
 // determineProxyURL determines the proxy URL for NPM handler
-// Priority: 1. Configured externalURL, 2. Auto-detect from request headers
-// Returns the full proxy URL including the path prefix (e.g., http://localhost:8080/npm)
+// Constructs URL dynamically from request headers + protocol config
+// Returns the full proxy URL including the path prefix (e.g., https://npm.example.com/npm)
 func (h *Handler) determineProxyURL(r *http.Request) string {
-	baseURL := utils.GetExternalURLOrDefault(h.externalURL, r)
-	return baseURL + h.config.PathPrefix
+	return h.getEffectiveBaseURL(r)
 }
 
 // rewritePackageJSON rewrites URLs in NPM package JSON metadata

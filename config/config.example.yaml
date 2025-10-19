@@ -5,15 +5,18 @@
 server:
   port: 8080
 
-  # External URL for reverse proxy deployment (optional)
-  # If set, this URL is used for URL rewriting in responses (e.g., Location headers, metadata files)
-  # If empty, auto-detected from request headers (Forwarded, X-Forwarded-Host, X-Forwarded-Proto, Host)
-  # Examples:
-  #   - Public: https://artifusion.example.com
-  #   - Private: http://artifusion.internal
-  #   - Development: http://localhost:8080
-  # Override with: ARTIFUSION_SERVER_EXTERNAL_URL
-  external_url: ""
+  # NOTE: Artifusion dynamically constructs URLs for responses based on:
+  # - Host-based routing: Uses the protocol's configured 'host' field
+  # - Path-based routing: Detects from request headers (Forwarded, X-Forwarded-Host, Host)
+  # - Scheme (http/https): Detects from Forwarded proto, X-Forwarded-Proto, or TLS state
+  #
+  # Ensure your reverse proxy sets these headers:
+  #   - X-Forwarded-Host (or Forwarded with host parameter)
+  #   - X-Forwarded-Proto (or Forwarded with proto parameter)
+  #
+  # Example nginx config:
+  #   proxy_set_header X-Forwarded-Host $host;
+  #   proxy_set_header X-Forwarded-Proto $scheme;
 
   read_timeout: 60s
   write_timeout: 300s    # 5 minutes for large uploads
@@ -52,11 +55,36 @@ rate_limit:
   per_user_burst: 200
 
 # ===== Protocol Handlers =====
+#
+# Two deployment models are supported:
+#
+# MODEL 1: Host-based routing (different domains per protocol)
+#   - Set `host` for each protocol (e.g., "npm.example.com", "maven.example.com")
+#   - Set `path_prefix` to "" for root path, or specify a prefix for namespacing
+#   - Requests are routed by the Host header (reverse proxy aware)
+#   - Example: npm.example.com/@scope/package -> NPM handler
+#             maven.example.com/releases/... -> Maven handler
+#
+# MODEL 2: Path-based routing (shared domain, different paths)
+#   - Leave `host` empty ("") for all protocols
+#   - Set `path_prefix` to unique value for each protocol (REQUIRED)
+#   - Requests are routed by URL path prefix
+#   - Example: artifusion.example.com/npm/@scope/package -> NPM handler
+#             artifusion.example.com/maven/releases/... -> Maven handler
+#
+# The example below uses MODEL 2 (path-based routing with shared domain).
+# For MODEL 1 examples, see comments in each protocol section.
+#
 protocols:
 
   # ===== OCI/Docker Registry Protocol =====
   oci:
     enabled: true
+
+    # Optional: Domain for host-based routing (e.g., docker.example.com)
+    # Leave empty for path-based routing (shared domain)
+    # When set, only requests to this host will be routed to OCI handler
+    host: ""
 
     client_auth:
       supported_schemes: [bearer, basic]
@@ -129,10 +157,18 @@ protocols:
   maven:
     enabled: true
 
-    # URL path prefix for all Maven requests (default: "/maven")
-    # All Maven requests must start with this prefix
+    # Host-based routing (optional)
+    # Set to domain name (e.g., "maven.example.com") for domain-based routing
+    # Leave empty for path-based routing (shared domain)
+    # When set, only requests to this host will be routed to Maven handler
+    host: ""
+
+    # Path prefix for Maven requests
+    # REQUIRED when host is empty (path-based routing)
+    # Optional when host is set (can be "" for root path)
     # Backend sees requests without this prefix
-    # Example: /maven/releases/com/example/app/1.0/app-1.0.jar -> /releases/com/example/app/1.0/app-1.0.jar
+    # Example with prefix: /maven/releases/com/example/app/1.0/app-1.0.jar
+    #   -> backend receives: /releases/com/example/app/1.0/app-1.0.jar
     path_prefix: /maven
 
     client_auth:
@@ -183,10 +219,17 @@ protocols:
   npm:
     enabled: true
 
-    # URL path prefix for all NPM requests (default: "/npm")
-    # All NPM requests must start with this prefix
+    # Host-based routing (optional)
+    # Set to domain name (e.g., "npm.example.com") for domain-based routing
+    # Leave empty for path-based routing (shared domain)
+    # When set, only requests to this host will be routed to NPM handler
+    host: ""
+
+    # Path prefix for NPM requests
+    # REQUIRED when host is empty (path-based routing)
+    # Optional when host is set (can be "" for root path)
     # Backend sees requests without this prefix
-    # Example: /npm/@scope/package -> /@scope/package
+    # Example with prefix: /npm/@scope/package -> /@scope/package
     path_prefix: /npm
 
     client_auth:

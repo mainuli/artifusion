@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -54,25 +55,6 @@ func (s *ServerConfig) Validate() error {
 		return fmt.Errorf("maxConcurrentRequests must be at least 1")
 	}
 
-	// Validate external_url if provided
-	if s.ExternalURL != "" {
-		parsedURL, err := url.Parse(s.ExternalURL)
-		if err != nil {
-			return fmt.Errorf("invalid external_url: %w", err)
-		}
-		// external_url must have a scheme and host
-		if parsedURL.Scheme == "" {
-			return fmt.Errorf("external_url must include scheme (http:// or https://)")
-		}
-		if parsedURL.Host == "" {
-			return fmt.Errorf("external_url must include host")
-		}
-		// external_url should not have a path (to avoid confusion)
-		if parsedURL.Path != "" && parsedURL.Path != "/" {
-			return fmt.Errorf("external_url should not include path (found: %s)", parsedURL.Path)
-		}
-	}
-
 	return nil
 }
 
@@ -88,6 +70,13 @@ func (g *GitHubConfig) Validate() error {
 
 	// RequiredOrg is optional - if empty, only PAT validation is performed
 	// If provided, organization membership will be checked
+
+	// SECURITY: Prevent team enforcement bypass
+	// If teams are required, org must also be specified since team checks
+	// only run inside the org membership validation block
+	if len(g.RequiredTeams) > 0 && g.RequiredOrg == "" {
+		return fmt.Errorf("required_org must be specified when required_teams is configured")
+	}
 
 	if g.AuthCacheTTL <= 0 {
 		return fmt.Errorf("invalid authCacheTTL: %v", g.AuthCacheTTL)
@@ -116,6 +105,24 @@ func (p *ProtocolsConfig) Validate() error {
 		}
 	}
 
+	// SECURITY: Validate path_prefix uniqueness for protocols with empty host
+	// This prevents routing conflicts where multiple protocols could match the same request
+	pathPrefixes := make(map[string]string) // map[path_prefix]protocol_name
+
+	if p.Maven.Enabled && p.Maven.Host == "" && p.Maven.PathPrefix != "" {
+		pathPrefixes[p.Maven.PathPrefix] = "maven"
+	}
+
+	if p.NPM.Enabled && p.NPM.Host == "" && p.NPM.PathPrefix != "" {
+		if existing, exists := pathPrefixes[p.NPM.PathPrefix]; exists {
+			return fmt.Errorf("path_prefix conflict: both %s and npm use path_prefix '%s' with empty host", existing, p.NPM.PathPrefix)
+		}
+		pathPrefixes[p.NPM.PathPrefix] = "npm"
+	}
+
+	// Note: OCI always uses /v2 path prefix, but this is implicitly unique
+	// since it's hardcoded in the detector and not configurable
+
 	return nil
 }
 
@@ -140,6 +147,18 @@ func (o *OCIConfig) Validate() error {
 
 // Validate validates Maven configuration
 func (m *MavenConfig) Validate() error {
+	// SECURITY: Prevent routing conflicts - require explicit path_prefix when host is not set
+	if m.Host == "" && m.PathPrefix == "" {
+		return fmt.Errorf("path_prefix is required when host is empty (set either host for domain-based routing or path_prefix for path-based routing)")
+	}
+
+	// Validate path_prefix format
+	if m.PathPrefix != "" {
+		if !strings.HasPrefix(m.PathPrefix, "/") {
+			return fmt.Errorf("path_prefix must start with '/' (got: %s)", m.PathPrefix)
+		}
+	}
+
 	if err := m.Backend.Validate(); err != nil {
 		return fmt.Errorf("backend: %w", err)
 	}
@@ -149,6 +168,18 @@ func (m *MavenConfig) Validate() error {
 
 // Validate validates NPM configuration
 func (n *NPMConfig) Validate() error {
+	// SECURITY: Prevent routing conflicts - require explicit path_prefix when host is not set
+	if n.Host == "" && n.PathPrefix == "" {
+		return fmt.Errorf("path_prefix is required when host is empty (set either host for domain-based routing or path_prefix for path-based routing)")
+	}
+
+	// Validate path_prefix format
+	if n.PathPrefix != "" {
+		if !strings.HasPrefix(n.PathPrefix, "/") {
+			return fmt.Errorf("path_prefix must start with '/' (got: %s)", n.PathPrefix)
+		}
+	}
+
 	if err := n.Backend.Validate(); err != nil {
 		return fmt.Errorf("backend: %w", err)
 	}
@@ -278,6 +309,19 @@ func (l *LoggingConfig) Validate() error {
 	if !validFormats[l.Format] {
 		return fmt.Errorf("invalid format: %s (must be json or console)", l.Format)
 	}
+
+	// NOTE: IncludeHeaders should only be used for debugging/troubleshooting
+	//
+	// While sensitive headers (Authorization, Cookie, etc.) are automatically redacted
+	// by the logging middleware, enabling header logging still has implications:
+	//
+	// 1. Performance: Increases log volume and processing overhead
+	// 2. Storage: Significantly larger log files
+	// 3. Privacy: Other headers may contain PII (User-Agent, X-Forwarded-For, Referer)
+	// 4. Compliance: May require additional data handling considerations
+	//
+	// A warning will be logged at startup if this is enabled.
+	// This is intentionally allowed to support debugging scenarios.
 
 	return nil
 }

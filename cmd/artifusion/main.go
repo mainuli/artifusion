@@ -90,6 +90,7 @@ func main() {
 		cfg.GitHub.APIURL,
 		cfg.GitHub.AuthCacheTTL,
 		cfg.GitHub.RateLimitBuffer,
+		logger,
 	)
 
 	// Create shared client authenticator
@@ -127,6 +128,13 @@ func main() {
 	router.Use(middleware.Recovery(logger))
 
 	// 4. Logging - log all requests
+	// SECURITY NOTICE: Warn if header logging is enabled
+	if cfg.Logging.IncludeHeaders {
+		logger.Warn().
+			Msg("Header logging is ENABLED. Sensitive headers (Authorization, Cookie, etc.) are redacted, " +
+				"but this may expose PII in other headers (User-Agent, X-Forwarded-For, Referer) and " +
+				"significantly increase log volume/storage costs. Only enable for debugging.")
+	}
 	router.Use(middleware.Logger(logger, cfg.Logging.IncludeHeaders, cfg.Logging.IncludeBody))
 
 	// 5. Request timeout - enforce maximum request duration
@@ -190,17 +198,17 @@ func main() {
 	if cfg.Protocols.OCI.Enabled {
 		ociHandler = oci.NewHandler(
 			&cfg.Protocols.OCI,
-			cfg.Server.ExternalURL,
 			clientAuthenticator,
 			proxyClient,
 			metricsCollector,
 			logger,
 		)
 
-		// Register OCI detector
-		detectorChain.Register(detector.NewOCIDetector())
+		// Register OCI detector with host
+		detectorChain.Register(detector.NewOCIDetector(cfg.Protocols.OCI.Host))
 
 		logger.Info().
+			Str("host", cfg.Protocols.OCI.Host).
 			Int("pull_backends", len(cfg.Protocols.OCI.PullBackends)).
 			Str("push_backend", cfg.Protocols.OCI.PushBackend.URL).
 			Msg("OCI/Docker protocol handler enabled")
@@ -210,19 +218,22 @@ func main() {
 	if cfg.Protocols.Maven.Enabled {
 		mavenHandler = maven.NewHandler(
 			&cfg.Protocols.Maven,
-			cfg.Server.ExternalURL,
 			clientAuthenticator,
 			proxyClient,
 			metricsCollector,
 			logger,
 		)
 
-		// Register Maven detector with path prefix
-		detectorChain.Register(detector.NewMavenDetector(cfg.Protocols.Maven.PathPrefix))
+		// Register Maven detector with host and path prefix
+		detectorChain.Register(detector.NewMavenDetector(
+			cfg.Protocols.Maven.Host,
+			cfg.Protocols.Maven.PathPrefix,
+		))
 
 		logger.Info().
-			Str("backend", cfg.Protocols.Maven.Backend.URL).
+			Str("host", cfg.Protocols.Maven.Host).
 			Str("path_prefix", cfg.Protocols.Maven.PathPrefix).
+			Str("backend", cfg.Protocols.Maven.Backend.URL).
 			Msg("Maven protocol handler enabled")
 	}
 
@@ -230,19 +241,22 @@ func main() {
 	if cfg.Protocols.NPM.Enabled {
 		npmHandler = npm.NewHandler(
 			&cfg.Protocols.NPM,
-			cfg.Server.ExternalURL,
 			clientAuthenticator,
 			proxyClient,
 			metricsCollector,
 			logger,
 		)
 
-		// Register NPM detector with path prefix
-		detectorChain.Register(detector.NewNPMDetector(cfg.Protocols.NPM.PathPrefix))
+		// Register NPM detector with host and path prefix
+		detectorChain.Register(detector.NewNPMDetector(
+			cfg.Protocols.NPM.Host,
+			cfg.Protocols.NPM.PathPrefix,
+		))
 
 		logger.Info().
-			Str("backend", cfg.Protocols.NPM.Backend.URL).
+			Str("host", cfg.Protocols.NPM.Host).
 			Str("path_prefix", cfg.Protocols.NPM.PathPrefix).
+			Str("backend", cfg.Protocols.NPM.Backend.URL).
 			Msg("NPM protocol handler enabled")
 	}
 

@@ -7,32 +7,47 @@ import (
 
 // NPMDetector detects NPM registry protocol requests
 type NPMDetector struct {
+	host       string
 	pathPrefix string
 }
 
 // NewNPMDetector creates a new NPM detector
-func NewNPMDetector(pathPrefix string) *NPMDetector {
-	// Ensure pathPrefix starts with / and doesn't end with /
-	if pathPrefix == "" {
-		pathPrefix = "/npm"
+// host: optional domain for host-based routing (e.g., "npm.example.com")
+// pathPrefix: path prefix for path-based routing - required when host is empty
+func NewNPMDetector(host, pathPrefix string) *NPMDetector {
+	// Normalize pathPrefix: ensure starts with /, no trailing /
+	// SECURITY: No silent defaults - pathPrefix must be explicit from config
+	if pathPrefix != "" {
+		if !strings.HasPrefix(pathPrefix, "/") {
+			pathPrefix = "/" + pathPrefix
+		}
+		pathPrefix = strings.TrimSuffix(pathPrefix, "/")
 	}
-	if !strings.HasPrefix(pathPrefix, "/") {
-		pathPrefix = "/" + pathPrefix
-	}
-	pathPrefix = strings.TrimSuffix(pathPrefix, "/")
 
 	return &NPMDetector{
+		host:       host,
 		pathPrefix: pathPrefix,
 	}
 }
 
 // Detect checks if the request is an NPM registry request
 func (d *NPMDetector) Detect(r *http.Request) bool {
+	// Check 0: Host matching (if configured)
+	if d.host != "" {
+		requestHost := getRequestHost(r)
+		if requestHost != d.host {
+			return false
+		}
+	}
+
 	path := r.URL.Path
 
-	// Check 0: Path prefix matching (e.g., /npm/*)
-	if strings.HasPrefix(path, d.pathPrefix+"/") || path == d.pathPrefix {
-		return true
+	// Check 1: Path prefix matching (if configured)
+	if d.pathPrefix != "" {
+		if !strings.HasPrefix(path, d.pathPrefix+"/") && path != d.pathPrefix {
+			// Path doesn't match prefix, skip remaining checks
+			return false
+		}
 	}
 
 	// Check 1: NPM-specific endpoints

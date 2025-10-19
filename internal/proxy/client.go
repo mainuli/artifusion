@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,6 +71,68 @@ type Response struct {
 	HTTPResp   *http.Response
 }
 
+// hopByHopHeaders lists HTTP/1.1 hop-by-hop headers per RFC 7230 Section 6.1.
+// These headers are meaningful only for a single transport-level connection
+// and must not be forwarded by proxies to prevent request smuggling and
+// connection poisoning attacks.
+var hopByHopHeaders = map[string]bool{
+	"connection":          true,
+	"proxy-connection":    true, // Non-standard but common
+	"keep-alive":          true,
+	"proxy-authenticate":  true,
+	"proxy-authorization": true,
+	"te":                  true,
+	"trailer":             true,
+	"transfer-encoding":   true,
+	"upgrade":             true,
+}
+
+// removeHopByHopHeaders filters headers that should not be forwarded to upstream.
+// Mirrors httputil.ReverseProxy behavior per RFC 7230.
+//
+// This prevents HTTP request smuggling attacks by ensuring hop-by-hop headers
+// (which are meant for a single connection) don't reach the backend.
+//
+// Additionally, any headers named in the Connection header are also removed,
+// as they are connection-specific per the HTTP spec.
+func removeHopByHopHeaders(headers http.Header) http.Header {
+	// Create a new header map for the filtered result
+	filtered := make(http.Header)
+
+	// Build set of headers to remove from Connection header values
+	// The Connection header can specify additional hop-by-hop headers
+	// e.g., "Connection: close, X-Custom-Header"
+	removeHeaders := make(map[string]bool)
+	for _, v := range headers["Connection"] {
+		for _, field := range strings.Split(v, ",") {
+			field = strings.TrimSpace(field)
+			if field != "" {
+				removeHeaders[strings.ToLower(field)] = true
+			}
+		}
+	}
+
+	// Copy headers except hop-by-hop ones
+	for key, values := range headers {
+		lowerKey := strings.ToLower(key)
+
+		// Skip if it's a standard hop-by-hop header
+		if hopByHopHeaders[lowerKey] {
+			continue
+		}
+
+		// Skip if it's named in Connection header
+		if removeHeaders[lowerKey] {
+			continue
+		}
+
+		// Safe to forward - copy all values
+		filtered[key] = values
+	}
+
+	return filtered
+}
+
 // ProxyRequest proxies a request to the backend with connection pooling and circuit breaker protection
 func (c *Client) ProxyRequest(req *Request) (*Response, error) {
 	// If circuit breaker is enabled for this backend, wrap the request
@@ -105,8 +168,12 @@ func (c *Client) doProxyRequest(req *Request) (*Response, error) {
 		return nil, fmt.Errorf("failed to create backend request: %w", err)
 	}
 
-	// Copy headers (excluding Authorization - backend auth already injected)
-	for key, values := range req.Headers {
+	// SECURITY: Filter hop-by-hop headers before forwarding (RFC 7230 Section 6.1)
+	// This prevents HTTP request smuggling and connection poisoning attacks
+	filteredHeaders := removeHopByHopHeaders(req.Headers)
+
+	// Copy safe headers (excluding Authorization - backend auth already injected)
+	for key, values := range filteredHeaders {
 		if key == "Authorization" {
 			continue
 		}

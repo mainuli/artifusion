@@ -1,10 +1,12 @@
 package npm
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/mainuli/artifusion/internal/auth"
 	"github.com/mainuli/artifusion/internal/config"
+	"github.com/mainuli/artifusion/internal/detector"
 	"github.com/mainuli/artifusion/internal/errors"
 	"github.com/mainuli/artifusion/internal/metrics"
 	"github.com/mainuli/artifusion/internal/proxy"
@@ -14,7 +16,6 @@ import (
 // Handler handles NPM registry protocol requests
 type Handler struct {
 	config        *config.NPMConfig
-	externalURL   string
 	authenticator *auth.ClientAuthenticator
 	proxyClient   *proxy.Client
 	metrics       *metrics.Metrics
@@ -24,7 +25,6 @@ type Handler struct {
 // NewHandler creates a new NPM handler
 func NewHandler(
 	cfg *config.NPMConfig,
-	externalURL string,
 	authenticator *auth.ClientAuthenticator,
 	proxyClient *proxy.Client,
 	metricsCollector *metrics.Metrics,
@@ -32,7 +32,6 @@ func NewHandler(
 ) *Handler {
 	return &Handler{
 		config:        cfg,
-		externalURL:   externalURL,
 		authenticator: authenticator,
 		proxyClient:   proxyClient,
 		metrics:       metricsCollector,
@@ -68,4 +67,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Name returns the handler name
 func (h *Handler) Name() string {
 	return "npm"
+}
+
+// getEffectiveBaseURL constructs the base URL for this NPM handler based on:
+// - Host-based routing: uses configured host + detected scheme
+// - Path-based routing: uses request host (proxy-aware) + detected scheme
+// - Includes configured path_prefix if set
+func (h *Handler) getEffectiveBaseURL(r *http.Request) string {
+	scheme := detector.GetRequestScheme(r)
+
+	var host string
+	if h.config.Host != "" {
+		// Host-based routing: use configured host
+		host = h.config.Host
+	} else {
+		// Path-based routing: detect host from request (proxy-aware)
+		host = detector.GetRequestHost(r)
+	}
+
+	baseURL := fmt.Sprintf("%s://%s", scheme, host)
+
+	// Add path prefix if configured
+	if h.config.PathPrefix != "" {
+		baseURL += h.config.PathPrefix
+	}
+
+	return baseURL
 }

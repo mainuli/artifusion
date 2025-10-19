@@ -41,6 +41,9 @@ func (h *Handler) handleAuthError(w http.ResponseWriter, r *http.Request, err er
 // injectBackendAuth injects backend authentication credentials
 func (h *Handler) injectBackendAuth(r *http.Request, backend *config.MavenBackendConfig) {
 	if backend.Auth == nil {
+		// SECURITY: Always strip client's Authorization header before proxying
+		// to prevent GitHub PAT leakage to upstream registry operators
+		r.Header.Del("Authorization")
 		return
 	}
 

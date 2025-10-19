@@ -4,16 +4,13 @@ import (
 	"bytes"
 	"net/http"
 	"strings"
-
-	"github.com/mainuli/artifusion/internal/utils"
 )
 
 // determineProxyURL determines the proxy URL for Maven handler
-// Priority: 1. Configured externalURL, 2. Auto-detect from request headers
-// Returns the full proxy URL including the path prefix (e.g., http://localhost:8080/m2)
+// Constructs URL dynamically from request headers + protocol config
+// Returns the full proxy URL including the path prefix (e.g., https://maven.example.com/maven)
 func (h *Handler) determineProxyURL(r *http.Request) string {
-	baseURL := utils.GetExternalURLOrDefault(h.externalURL, r)
-	return baseURL + h.config.PathPrefix
+	return h.getEffectiveBaseURL(r)
 }
 
 // rewriteBody rewrites URLs in response body

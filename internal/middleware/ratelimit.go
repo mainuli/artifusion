@@ -140,13 +140,16 @@ func (rl *RateLimiter) cleanupStaleUserLimiters() {
 				}
 			}
 
+			// CONCURRENCY FIX: Capture length before releasing mutex
+			// to prevent concurrent map read/write with getUserLimiter
+			remainingCount := len(rl.perUser)
 			rl.mu.Unlock()
 
 			// Log cleanup activity if any limiters were removed
 			if removedCount > 0 {
 				log.Debug().
 					Int("removed_count", removedCount).
-					Int("remaining_count", len(rl.perUser)).
+					Int("remaining_count", remainingCount).
 					Msg("Rate limiter cleanup: removed stale user limiters")
 			}
 

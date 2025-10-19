@@ -7,7 +7,6 @@ import (
 	"github.com/mainuli/artifusion/internal/config"
 	"github.com/mainuli/artifusion/internal/proxy"
 	"github.com/mainuli/artifusion/internal/proxy/rewriter"
-	"github.com/mainuli/artifusion/internal/utils"
 )
 
 // proxyTransparent proxies the request to the backend transparently
@@ -153,17 +152,11 @@ func (h *Handler) prepareOCIHeaders(r *http.Request, resp *proxy.Response, backe
 	}
 
 	// Determine public URL for URL rewriting
-	// Priority: 1. Configured publicURL, 2. Proxy headers, 3. Request URL
-	publicURL := h.determinePublicURL(r)
+	// Constructs base URL dynamically from request headers + protocol config
+	publicURL := h.getEffectiveBaseURL(r)
 
 	// Use URL rewriter to rewrite response headers (Location, WWW-Authenticate, etc.)
 	h.getURLRewriter(publicURL).RewriteResponseHeaders(resp, backend)
-}
-
-// determinePublicURL determines the public URL for this OCI handler
-// Priority: 1. Configured externalURL, 2. Auto-detect from request headers
-func (h *Handler) determinePublicURL(r *http.Request) string {
-	return utils.GetExternalURLOrDefault(h.externalURL, r)
 }
 
 // getURLRewriter returns a URL rewriter configured with the given public URL

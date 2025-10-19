@@ -31,7 +31,6 @@ type AuthCache struct {
 	// Metrics (atomic for thread-safety)
 	hits   atomic.Int64
 	misses atomic.Int64
-	size   atomic.Int32
 }
 
 // NewAuthCache creates a new authentication cache
@@ -76,7 +75,6 @@ func (c *AuthCache) Get(ctx context.Context, pat string, validator func(context.
 
 		// Cache the result
 		c.cache.Set(key, authResult, c.ttl)
-		c.size.Add(1)
 
 		return authResult, nil
 	})
@@ -92,13 +90,11 @@ func (c *AuthCache) Get(ctx context.Context, pat string, validator func(context.
 func (c *AuthCache) Invalidate(pat string) {
 	key := c.hashPAT(pat)
 	c.cache.Delete(key)
-	c.size.Add(-1)
 }
 
 // Clear removes all entries from the cache
 func (c *AuthCache) Clear() {
 	c.cache.Flush()
-	c.size.Store(0)
 }
 
 // Stats returns cache statistics
@@ -106,7 +102,7 @@ func (c *AuthCache) Stats() CacheStats {
 	return CacheStats{
 		Hits:   c.hits.Load(),
 		Misses: c.misses.Load(),
-		Size:   int(c.size.Load()),
+		Size:   c.cache.ItemCount(),
 		HitRate: func() float64 {
 			hits := c.hits.Load()
 			misses := c.misses.Load()

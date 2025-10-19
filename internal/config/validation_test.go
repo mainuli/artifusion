@@ -202,6 +202,27 @@ func TestGitHubConfig_Validate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "invalid authCacheTTL",
 		},
+		{
+			name: "required_teams without required_org (security bypass)",
+			config: GitHubConfig{
+				APIURL:        "https://api.github.com",
+				RequiredOrg:   "",
+				RequiredTeams: []string{"team1", "team2"},
+				AuthCacheTTL:  30 * time.Minute,
+			},
+			wantErr: true,
+			errMsg:  "required_org must be specified when required_teams is configured",
+		},
+		{
+			name: "required_teams with required_org (valid)",
+			config: GitHubConfig{
+				APIURL:        "https://api.github.com",
+				RequiredOrg:   "myorg",
+				RequiredTeams: []string{"team1", "team2"},
+				AuthCacheTTL:  30 * time.Minute,
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -353,6 +374,34 @@ func TestLoggingConfig_Validate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "invalid format",
 		},
+		{
+			name: "include_headers enabled (allowed with warning)",
+			config: LoggingConfig{
+				Level:          "info",
+				Format:         "json",
+				IncludeHeaders: true,
+			},
+			wantErr: false, // Should be allowed, operator gets warning at startup
+		},
+		{
+			name: "include_body enabled (allowed with warning)",
+			config: LoggingConfig{
+				Level:       "debug",
+				Format:      "json",
+				IncludeBody: true,
+			},
+			wantErr: false, // Should be allowed
+		},
+		{
+			name: "both include_headers and include_body enabled",
+			config: LoggingConfig{
+				Level:          "debug",
+				Format:         "console",
+				IncludeHeaders: true,
+				IncludeBody:    true,
+			},
+			wantErr: false, // Should be allowed, operator gets warnings
+		},
 	}
 
 	for _, tt := range tests {
@@ -444,8 +493,10 @@ func TestMavenConfig_Validate(t *testing.T) {
 		errMsg  string
 	}{
 		{
-			name: "valid config",
+			name: "valid config with host and path_prefix",
 			config: MavenConfig{
+				Host:       "maven.example.com",
+				PathPrefix: "/maven",
 				Backend: MavenBackendConfig{
 					URL:                 "https://repo.example.com",
 					MaxIdleConns:        200,
@@ -455,6 +506,68 @@ func TestMavenConfig_Validate(t *testing.T) {
 				},
 			},
 			wantErr: false,
+		},
+		{
+			name: "valid config with host and empty path_prefix",
+			config: MavenConfig{
+				Host:       "maven.example.com",
+				PathPrefix: "",
+				Backend: MavenBackendConfig{
+					URL:                 "https://repo.example.com",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid config with empty host and path_prefix",
+			config: MavenConfig{
+				Host:       "",
+				PathPrefix: "/maven",
+				Backend: MavenBackendConfig{
+					URL:                 "https://repo.example.com",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid - empty host requires path_prefix",
+			config: MavenConfig{
+				Host:       "",
+				PathPrefix: "",
+				Backend: MavenBackendConfig{
+					URL:                 "https://repo.example.com",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+			wantErr: true,
+			errMsg:  "path_prefix is required when host is empty",
+		},
+		{
+			name: "invalid - path_prefix must start with /",
+			config: MavenConfig{
+				Host:       "",
+				PathPrefix: "maven",
+				Backend: MavenBackendConfig{
+					URL:                 "https://repo.example.com",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+			wantErr: true,
+			errMsg:  "path_prefix must start with '/'",
 		},
 	}
 
@@ -472,6 +585,217 @@ func TestMavenConfig_Validate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNPMConfig_Validate tests NPM protocol validation
+func TestNPMConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  NPMConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid config with host and path_prefix",
+			config: NPMConfig{
+				Host:       "npm.example.com",
+				PathPrefix: "/npm",
+				Backend: NPMBackendConfig{
+					URL:                 "https://registry.npmjs.org",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid config with host and empty path_prefix",
+			config: NPMConfig{
+				Host:       "npm.example.com",
+				PathPrefix: "",
+				Backend: NPMBackendConfig{
+					URL:                 "https://registry.npmjs.org",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid config with empty host and path_prefix",
+			config: NPMConfig{
+				Host:       "",
+				PathPrefix: "/npm",
+				Backend: NPMBackendConfig{
+					URL:                 "https://registry.npmjs.org",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid - empty host requires path_prefix",
+			config: NPMConfig{
+				Host:       "",
+				PathPrefix: "",
+				Backend: NPMBackendConfig{
+					URL:                 "https://registry.npmjs.org",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+			wantErr: true,
+			errMsg:  "path_prefix is required when host is empty",
+		},
+		{
+			name: "invalid - path_prefix must start with /",
+			config: NPMConfig{
+				Host:       "",
+				PathPrefix: "npm",
+				Backend: NPMBackendConfig{
+					URL:                 "https://registry.npmjs.org",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+			wantErr: true,
+			errMsg:  "path_prefix must start with '/'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.wantErr && err == nil {
+				t.Error("expected error but got none")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if tt.wantErr && err != nil && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("expected error containing '%s', got '%s'", tt.errMsg, err.Error())
+			}
+		})
+	}
+}
+
+// TestProtocolsConfig_PathPrefixUniqueness tests path_prefix uniqueness validation
+func TestProtocolsConfig_PathPrefixUniqueness(t *testing.T) {
+	t.Run("path_prefix conflict - both protocols use /registry with empty host", func(t *testing.T) {
+		cfg := ProtocolsConfig{
+			Maven: MavenConfig{
+				Enabled:    true,
+				Host:       "",
+				PathPrefix: "/registry",
+				Backend: MavenBackendConfig{
+					URL:                 "https://maven.example.com",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+			NPM: NPMConfig{
+				Enabled:    true,
+				Host:       "",
+				PathPrefix: "/registry",
+				Backend: NPMBackendConfig{
+					URL:                 "https://npm.example.com",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+		}
+
+		err := cfg.Validate()
+		if err == nil {
+			t.Error("expected error for path_prefix conflict")
+		}
+		if !strings.Contains(err.Error(), "path_prefix conflict") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("same path_prefix allowed with different hosts", func(t *testing.T) {
+		cfg := ProtocolsConfig{
+			Maven: MavenConfig{
+				Enabled:    true,
+				Host:       "maven.example.com",
+				PathPrefix: "/api",
+				Backend: MavenBackendConfig{
+					URL:                 "https://maven.example.com",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+			NPM: NPMConfig{
+				Enabled:    true,
+				Host:       "npm.example.com",
+				PathPrefix: "/api",
+				Backend: NPMBackendConfig{
+					URL:                 "https://npm.example.com",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+		}
+
+		err := cfg.Validate()
+		if err != nil {
+			t.Errorf("should allow same path_prefix with different hosts, got error: %v", err)
+		}
+	})
+
+	t.Run("unique path_prefix with empty host - valid", func(t *testing.T) {
+		cfg := ProtocolsConfig{
+			Maven: MavenConfig{
+				Enabled:    true,
+				Host:       "",
+				PathPrefix: "/maven",
+				Backend: MavenBackendConfig{
+					URL:                 "https://maven.example.com",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+			NPM: NPMConfig{
+				Enabled:    true,
+				Host:       "",
+				PathPrefix: "/npm",
+				Backend: NPMBackendConfig{
+					URL:                 "https://npm.example.com",
+					MaxIdleConns:        200,
+					MaxIdleConnsPerHost: 100,
+					DialTimeout:         10 * time.Second,
+					RequestTimeout:      300 * time.Second,
+				},
+			},
+		}
+
+		err := cfg.Validate()
+		if err != nil {
+			t.Errorf("should allow unique path_prefix, got error: %v", err)
+		}
+	})
 }
 
 // TestValidateBackendCommon tests the common backend validation helper

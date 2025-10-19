@@ -17,7 +17,8 @@
 //
 // Usage Example:
 //
-//	githubClient := NewGitHubClient("https://api.github.com", 5*time.Minute, 0)
+//	logger := zerolog.New(os.Stdout)
+//	githubClient := NewGitHubClient("https://api.github.com", 5*time.Minute, 0, logger)
 //	result, err := githubClient.Validate(ctx, token, "my-org", []string{"my-team"})
 //	if err != nil {
 //	    log.Fatal(err)
@@ -34,6 +35,7 @@ import (
 
 	"github.com/google/go-github/v58/github"
 	"github.com/mainuli/artifusion/internal/constants"
+	"github.com/rs/zerolog"
 	"golang.org/x/oauth2"
 	"golang.org/x/time/rate"
 )
@@ -53,6 +55,7 @@ type GitHubClient struct {
 	rateLimit       *rate.Limiter // Token bucket rate limiter
 	rateLimitBuffer int           // Buffer to stay below GitHub's actual limits
 	cache           *AuthCache    // LRU cache with TTL and singleflight
+	logger          zerolog.Logger
 }
 
 // NewGitHubClient creates a new GitHub client optimized for high concurrency.
@@ -61,12 +64,13 @@ type GitHubClient struct {
 //   - apiURL: GitHub API base URL (e.g., "https://api.github.com" or enterprise URL)
 //   - cacheTTL: Time-to-live for cached authentication results
 //   - rateLimitBuffer: Buffer below GitHub's rate limit (in requests/hour)
+//   - logger: Structured logger for debug output and error tracking
 //
 // The rate limiter is configured at 1.2 req/sec with burst of 50, which translates
 // to approximately 4,320 req/hr - well below GitHub's 5,000 req/hr limit.
 //
 // Returns a fully initialized GitHubClient ready for concurrent use.
-func NewGitHubClient(apiURL string, cacheTTL time.Duration, rateLimitBuffer int) *GitHubClient {
+func NewGitHubClient(apiURL string, cacheTTL time.Duration, rateLimitBuffer int, logger zerolog.Logger) *GitHubClient {
 	// Create auth cache
 	cache := NewAuthCache(cacheTTL)
 
@@ -80,6 +84,7 @@ func NewGitHubClient(apiURL string, cacheTTL time.Duration, rateLimitBuffer int)
 		rateLimit:       limiter,
 		rateLimitBuffer: rateLimitBuffer,
 		cache:           cache,
+		logger:          logger,
 	}
 }
 
@@ -200,6 +205,11 @@ func (c *GitHubClient) validatePATToken(ctx context.Context, token string, requi
 		if err != nil {
 			// SECURITY: Sanitize error to avoid exposing internal details
 			// Log the actual error internally, but return a generic message to the client
+			c.logger.Debug().
+				Err(err).
+				Str("org", requiredOrg).
+				Str("username", username).
+				Msg("GitHub API error during organization membership check")
 			return nil, fmt.Errorf("authentication failed: unable to verify organization membership")
 		}
 
@@ -269,6 +279,9 @@ func (c *GitHubClient) validateGitHubActionsToken(ctx context.Context, token str
 		PerPage: 1, // OPTIMIZATION: Only fetch one repo to get owner
 	})
 	if err != nil {
+		c.logger.Debug().
+			Err(err).
+			Msg("GitHub API error during installation repositories fetch")
 		return nil, fmt.Errorf("failed to fetch installation repositories: %w", err)
 	}
 

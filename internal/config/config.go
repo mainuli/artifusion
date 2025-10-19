@@ -19,7 +19,6 @@ type Config struct {
 // ServerConfig contains HTTP server configuration
 type ServerConfig struct {
 	Port              int           `mapstructure:"port"`
-	ExternalURL       string        `mapstructure:"external_url"` // External URL for reverse proxy (e.g., https://artifusion.example.com or http://artifusion.internal)
 	ReadTimeout       time.Duration `mapstructure:"read_timeout"`
 	WriteTimeout      time.Duration `mapstructure:"write_timeout"`
 	IdleTimeout       time.Duration `mapstructure:"idle_timeout"`
@@ -49,6 +48,7 @@ type ProtocolsConfig struct {
 // OCIConfig contains OCI/Docker registry configuration
 type OCIConfig struct {
 	Enabled      bool               `mapstructure:"enabled"`
+	Host         string             `mapstructure:"host"` // Optional: domain for host-based routing (e.g., "docker.example.com")
 	ClientAuth   ClientAuthConfig   `mapstructure:"client_auth"`
 	PullBackends []OCIBackendConfig `mapstructure:"pull_backends"`
 	PushBackend  OCIBackendConfig   `mapstructure:"push_backend"`
@@ -57,7 +57,8 @@ type OCIConfig struct {
 // MavenConfig contains Maven repository configuration
 type MavenConfig struct {
 	Enabled    bool               `mapstructure:"enabled"`
-	PathPrefix string             `mapstructure:"path_prefix"` // URL path prefix for Maven requests (default: "/maven")
+	Host       string             `mapstructure:"host"`        // Optional: domain for host-based routing (e.g., "maven.example.com")
+	PathPrefix string             `mapstructure:"path_prefix"` // URL path prefix - required when host is empty
 	ClientAuth ClientAuthConfig   `mapstructure:"client_auth"`
 	Backend    MavenBackendConfig `mapstructure:"backend"`
 }
@@ -65,7 +66,8 @@ type MavenConfig struct {
 // NPMConfig contains NPM registry configuration
 type NPMConfig struct {
 	Enabled    bool             `mapstructure:"enabled"`
-	PathPrefix string           `mapstructure:"path_prefix"` // URL path prefix for NPM requests (default: "/npm")
+	Host       string           `mapstructure:"host"`        // Optional: domain for host-based routing (e.g., "npm.example.com")
+	PathPrefix string           `mapstructure:"path_prefix"` // URL path prefix - required when host is empty
 	ClientAuth ClientAuthConfig `mapstructure:"client_auth"`
 	Backend    NPMBackendConfig `mapstructure:"backend"`
 }

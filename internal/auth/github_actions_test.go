@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 // TestValidateGitHubActionsToken tests the GitHub Actions token validation flow
@@ -61,7 +63,8 @@ func TestGitHubActionsTokenDetection(t *testing.T) {
 // TestTokenTypeRouting tests that tokens are routed to the correct validation method
 func TestTokenTypeRouting(t *testing.T) {
 	// Create a GitHub client with cache
-	client := NewGitHubClient("https://api.github.com", 5*time.Minute, 10)
+	logger := zerolog.Nop() // Use no-op logger for tests
+	client := NewGitHubClient("https://api.github.com", 5*time.Minute, 10, logger)
 
 	tests := []struct {
 		name     string

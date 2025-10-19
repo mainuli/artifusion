@@ -1,10 +1,12 @@
 package oci
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/mainuli/artifusion/internal/auth"
 	"github.com/mainuli/artifusion/internal/config"
+	"github.com/mainuli/artifusion/internal/detector"
 	"github.com/mainuli/artifusion/internal/errors"
 	"github.com/mainuli/artifusion/internal/metrics"
 	"github.com/mainuli/artifusion/internal/proxy"
@@ -14,7 +16,6 @@ import (
 // Handler handles OCI/Docker registry protocol requests
 type Handler struct {
 	config        *config.OCIConfig
-	externalURL   string
 	authenticator *auth.ClientAuthenticator
 	proxyClient   *proxy.Client
 	metrics       *metrics.Metrics
@@ -24,7 +25,6 @@ type Handler struct {
 // NewHandler creates a new OCI handler
 func NewHandler(
 	cfg *config.OCIConfig,
-	externalURL string,
 	authenticator *auth.ClientAuthenticator,
 	proxyClient *proxy.Client,
 	metricsCollector *metrics.Metrics,
@@ -32,7 +32,6 @@ func NewHandler(
 ) *Handler {
 	return &Handler{
 		config:        cfg,
-		externalURL:   externalURL,
 		authenticator: authenticator,
 		proxyClient:   proxyClient,
 		metrics:       metricsCollector,
@@ -68,4 +67,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Name returns the handler name
 func (h *Handler) Name() string {
 	return "oci"
+}
+
+// getEffectiveBaseURL constructs the base URL for this OCI handler based on:
+// - Host-based routing: uses configured host + detected scheme
+// - Path-based routing: uses request host (proxy-aware) + detected scheme
+// - OCI always uses /v2 path (hardcoded by OCI spec, not configurable)
+func (h *Handler) getEffectiveBaseURL(r *http.Request) string {
+	scheme := detector.GetRequestScheme(r)
+
+	var host string
+	if h.config.Host != "" {
+		// Host-based routing: use configured host
+		host = h.config.Host
+	} else {
+		// Path-based routing: detect host from request (proxy-aware)
+		host = detector.GetRequestHost(r)
+	}
+
+	// OCI always uses /v2 path (hardcoded by OCI Distribution Spec)
+	return fmt.Sprintf("%s://%s/v2", scheme, host)
 }

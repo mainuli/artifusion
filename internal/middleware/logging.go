@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -23,6 +24,34 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	n, err := rw.ResponseWriter.Write(b)
 	rw.bytesWritten += int64(n)
 	return n, err
+}
+
+// sanitizeHeaders redacts sensitive headers to prevent leaking secrets into logs.
+// Returns a sanitized copy safe for logging.
+func sanitizeHeaders(headers http.Header) map[string]interface{} {
+	// Sensitive headers that must be redacted to prevent credential leakage
+	sensitiveHeaders := map[string]bool{
+		"authorization":       true,
+		"cookie":              true,
+		"set-cookie":          true,
+		"x-auth-token":        true,
+		"x-api-key":           true,
+		"proxy-authorization": true,
+		"x-csrf-token":        true,
+		"x-session-token":     true,
+	}
+
+	sanitized := make(map[string]interface{})
+	for key, values := range headers {
+		lowerKey := strings.ToLower(key)
+		if sensitiveHeaders[lowerKey] {
+			sanitized[key] = "[REDACTED]"
+		} else {
+			// Safe headers are logged verbatim
+			sanitized[key] = values
+		}
+	}
+	return sanitized
 }
 
 // Logger creates a structured logging middleware
@@ -49,7 +78,8 @@ func Logger(logger zerolog.Logger, includeHeaders bool, _ bool) func(http.Handle
 				Str("user_agent", r.UserAgent())
 
 			if includeHeaders {
-				event = event.Interface("headers", r.Header)
+				// SECURITY: Use sanitizeHeaders to prevent leaking Authorization, Cookie, etc.
+				event = event.Interface("headers", sanitizeHeaders(r.Header))
 			}
 
 			event.Msg("Request started")
