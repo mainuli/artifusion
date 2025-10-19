@@ -4,9 +4,7 @@ services:
 
   # ===== Artifusion Reverse Proxy =====
   artifusion:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
+    image: artifusion:latest
     container_name: artifusion
     ports:
       - "8080:8080"

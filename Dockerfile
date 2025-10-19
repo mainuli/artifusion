@@ -25,7 +25,9 @@ COPY . .
 # Build binary with optimizations for Go 1.25
 # Using CGO_ENABLED=0 for fully static binary
 # Version information is injected via ldflags from build args
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+# TARGETARCH is automatically set by Docker buildx based on the platform being built
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -a \
     -installsuffix cgo \
     -ldflags="-w -s \
