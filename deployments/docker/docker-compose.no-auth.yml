@@ -1,0 +1,165 @@
+version: '3.8'
+
+services:
+
+  # ===== Artifusion Reverse Proxy =====
+  artifusion:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: artifusion
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount custom config
+      - ./config/artifusion.yaml:/etc/artifusion/config.yaml:ro
+    environment:
+      # GitHub authentication
+      ARTIFUSION_GITHUB_REQUIREDORG: ${GITHUB_ORG}
+      ARTIFUSION_GITHUB_REQUIREDTEAMS: ${GITHUB_TEAMS}
+      ARTIFUSION_GITHUB_AUTHCACHETTL: ${AUTH_CACHE_TTL:-30m}
+
+      # Logging
+      ARTIFUSION_LOGGING_LEVEL: ${LOG_LEVEL:-info}
+      ARTIFUSION_LOGGING_FORMAT: ${LOG_FORMAT:-console}
+    depends_on:
+      - oci-registry
+      - registry
+      - reposilite
+      - verdaccio
+    networks:
+      - artifusion
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ===== OCI Pull-Through Cache with Multi-Upstream Support =====
+  oci-registry:
+    image: mcronce/oci-registry:latest
+    container_name: oci-registry
+    command:
+      - --listen
+      - 0.0.0.0:8080
+      - --upstream-config-file
+      - /etc/oci-registry/upstream-config.yaml
+      - filesystem
+      - --root
+      - /var/lib/oci-cache
+    volumes:
+      - ./config/oci-registry-upstream.yaml:/etc/oci-registry/upstream-config.yaml:ro
+      - oci-cache:/var/lib/oci-cache
+    environment:
+      # Upstream registry credentials for private repos
+      UPSTREAM_CREDENTIALS: ${UPSTREAM_CREDENTIALS}
+    depends_on:
+      - registry
+    networks:
+      - artifusion
+    restart: unless-stopped
+
+  # ===== Docker Registry (Push Target & Local Storage) =====
+  # NO AUTHENTICATION: Runs on private network, protected by Artifusion only
+  registry:
+    image: registry:2
+    container_name: docker-registry
+    volumes:
+      - registry-data:/var/lib/registry
+    environment:
+      # Enable blob deletion
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+
+      # Performance tuning
+      REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR: inmemory
+    networks:
+      - artifusion
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5000/v2/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ===== Maven Repository (Reposilite) =====
+  # NO AUTHENTICATION: Runs on private network, protected by Artifusion only
+  # Note: Reposilite config may still define tokens, but they won't be enforced
+  reposilite:
+    image: dzikoysk/reposilite:latest
+    container_name: reposilite
+    ports:
+      - "8081:8080"  # Expose for direct access (optional, for debugging)
+    volumes:
+      - ./config/reposilite-no-auth.cdn:/app/configuration
+      - reposilite-data:/app/data
+    environment:
+      # Server configuration
+      REPOSILITE_HOSTNAME: 0.0.0.0
+      REPOSILITE_PORT: 8080
+
+      # GitHub Packages token for proxying GitHub Packages Maven artifacts
+      GITHUB_PACKAGES_TOKEN: ${GITHUB_PACKAGES_TOKEN}
+
+      # Java options (optional - adjust heap size if needed)
+      JAVA_OPTS: "-Xms256m -Xmx512m"
+    networks:
+      - artifusion
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/maven/details/releases"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ===== NPM Registry (Verdaccio) =====
+  # NO AUTHENTICATION: Runs on private network, protected by Artifusion only
+  verdaccio:
+    image: verdaccio/verdaccio:6
+    container_name: verdaccio
+    ports:
+      - "4873:4873"  # Expose for direct access (optional, for debugging)
+    volumes:
+      - ./config/verdaccio-no-auth.yaml:/verdaccio/conf/config.yaml:ro
+      - verdaccio-storage:/verdaccio/storage
+    environment:
+      # Verdaccio server configuration
+      VERDACCIO_PORT: 4873
+      VERDACCIO_PROTOCOL: http
+
+      # GitHub Packages token for proxying GitHub Packages NPM artifacts
+      # This token should have read:packages scope
+      NPM_TOKEN: ${GITHUB_PACKAGES_TOKEN}
+
+      # Optional: Set upstream registry authentication
+      # Format: //npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}
+      NODE_ENV: production
+
+      # Logging
+      VERDACCIO_LOG_LEVEL: ${VERDACCIO_LOG_LEVEL:-info}
+    networks:
+      - artifusion
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4873/-/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  oci-cache:
+    driver: local
+  registry-data:
+    driver: local
+  reposilite-data:
+    driver: local
+  verdaccio-storage:
+    driver: local
+
+networks:
+  artifusion:
+    driver: bridge
+    name: artifusion

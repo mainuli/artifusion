@@ -1,0 +1,239 @@
+# Artifusion Configuration Example
+# Multi-Protocol Reverse Proxy with GitHub Authentication
+
+# ===== Server Configuration =====
+server:
+  port: 8080
+
+  # External URL for reverse proxy deployment (optional)
+  # If set, this URL is used for URL rewriting in responses (e.g., Location headers, metadata files)
+  # If empty, auto-detected from request headers (Forwarded, X-Forwarded-Host, X-Forwarded-Proto, Host)
+  # Examples:
+  #   - Public: https://artifusion.example.com
+  #   - Private: http://artifusion.internal
+  #   - Development: http://localhost:8080
+  # Override with: ARTIFUSION_SERVER_EXTERNAL_URL
+  external_url: ""
+
+  read_timeout: 60s
+  write_timeout: 300s    # 5 minutes for large uploads
+  idle_timeout: 120s     # Keep-alive timeout
+  shutdown_timeout: 30s
+  max_header_bytes: 1048576  # 1MB
+  read_buffer_size: 32768    # 32KB
+  write_buffer_size: 32768   # 32KB
+  max_concurrent_requests: 10000  # Max concurrent requests
+
+# ===== GitHub Authentication =====
+github:
+  api_url: https://api.github.com
+
+  # Organization requirement (empty = allow any valid GitHub user)
+  required_org: ""
+  # required_org: my-organization
+
+  # Team requirements (only checked if required_org is set)
+  required_teams: []
+  # required_teams: [platform-team, security-team]
+
+  # Auth cache TTL (reduces GitHub API calls by ~99%)
+  auth_cache_ttl: 30m
+
+  # Rate limit warning threshold
+  rate_limit_buffer: 100
+
+# ===== Rate Limiting =====
+rate_limit:
+  enabled: true
+  requests_per_sec: 1000.0
+  burst: 2000
+  per_user_enabled: true
+  per_user_requests: 100.0
+  per_user_burst: 200
+
+# ===== Protocol Handlers =====
+protocols:
+
+  # ===== OCI/Docker Registry Protocol =====
+  oci:
+    enabled: true
+
+    client_auth:
+      supported_schemes: [bearer, basic]
+      realm: ""  # Empty = direct auth, no token endpoint
+      service: "artifusion"
+
+    # Pull backends (cascade by array order - first = highest priority)
+    pull_backends:
+      # 1. Local hosted registry (highest priority)
+      - name: local-hosted
+        url: http://registry:5000
+        upstream_namespace: ""
+        path_rewrite:
+          add_library_prefix: false
+        max_idle_conns: 200
+        max_idle_conns_per_host: 100
+        idle_conn_timeout: 90s
+        dial_timeout: 10s
+        request_timeout: 300s
+
+      # 2. GitHub Container Registry (scope-based routing)
+      - name: ghcr
+        url: http://oci-registry:8080
+        upstream_namespace: ghcr.io
+        scope: []  # Empty: use required_org | ["*"]: all orgs | [org1, org2]: specific orgs
+        path_rewrite:
+          add_library_prefix: false
+        max_idle_conns: 200
+        max_idle_conns_per_host: 100
+        idle_conn_timeout: 90s
+        dial_timeout: 10s
+        request_timeout: 300s
+
+      # 3. Docker Hub (with library/ prefix for official images)
+      - name: dockerhub
+        url: http://oci-registry:8080
+        upstream_namespace: docker.io
+        path_rewrite:
+          add_library_prefix: true
+        max_idle_conns: 200
+        max_idle_conns_per_host: 100
+        idle_conn_timeout: 90s
+        dial_timeout: 10s
+        request_timeout: 300s
+
+      # 4. Quay.io (lowest priority)
+      - name: quay
+        url: http://oci-registry:8080
+        upstream_namespace: quay.io
+        path_rewrite:
+          add_library_prefix: false
+        max_idle_conns: 200
+        max_idle_conns_per_host: 100
+        idle_conn_timeout: 90s
+        dial_timeout: 10s
+        request_timeout: 300s
+
+    # Push backend (direct to registry:5000)
+    # No authentication required - backend is on private network
+    push_backend:
+      name: push
+      url: http://registry:5000
+      max_idle_conns: 200
+      max_idle_conns_per_host: 100
+      idle_conn_timeout: 90s
+      dial_timeout: 10s
+      request_timeout: 300s
+
+  # ===== Maven Repository Protocol =====
+  maven:
+    enabled: true
+
+    # URL path prefix for all Maven requests (default: "/maven")
+    # All Maven requests must start with this prefix
+    # Backend sees requests without this prefix
+    # Example: /maven/releases/com/example/app/1.0/app-1.0.jar -> /releases/com/example/app/1.0/app-1.0.jar
+    path_prefix: /maven
+
+    client_auth:
+      supported_schemes: [basic, bearer]
+      realm: "Artifusion Maven Repository"
+
+    # Backend: Reposilite Maven Repository Manager
+    # Reposilite handles multiple repositories internally:
+    #
+    # HOSTED REPOSITORIES (for deploying artifacts):
+    #   - /releases       - Stable releases (immutable, e.g., 1.0.0)
+    #   - /snapshots      - Development snapshots (mutable, e.g., 1.0.0-SNAPSHOT)
+    #
+    # MIRROR REPOSITORIES (cascade priority order for pulls):
+    #   1. /github-packages  - GitHub Packages (requires GitHub PAT)
+    #   2. /maven-central    - Maven Central Repository
+    #   3. /google           - Google Maven (Android/Google libraries)
+    #   4. /spring-releases  - Spring Framework libraries
+    #   5. /gradle-plugins   - Gradle plugins
+    #   6. /jcenter          - JCenter (legacy, optional)
+    #
+    # Reposilite caches all proxied artifacts for faster subsequent access.
+    #
+    # Maven client configuration (note the /m2 prefix):
+    #   <distributionManagement>
+    #     <repository>
+    #       <id>artifusion-releases</id>
+    #       <url>http://localhost:8080/m2/releases</url>
+    #     </repository>
+    #     <snapshotRepository>
+    #       <id>artifusion-snapshots</id>
+    #       <url>http://localhost:8080/m2/snapshots</url>
+    #     </snapshotRepository>
+    #   </distributionManagement>
+    #
+    # Backend: Reposilite Maven Repository Manager
+    # No authentication required - backend is on private network
+    backend:
+      name: reposilite
+      url: http://reposilite:8080
+      max_idle_conns: 200
+      max_idle_conns_per_host: 100
+      idle_conn_timeout: 90s
+      dial_timeout: 10s
+      request_timeout: 300s
+
+  # ===== NPM Registry Protocol =====
+  npm:
+    enabled: true
+
+    # URL path prefix for all NPM requests (default: "/npm")
+    # All NPM requests must start with this prefix
+    # Backend sees requests without this prefix
+    # Example: /npm/@scope/package -> /@scope/package
+    path_prefix: /npm
+
+    client_auth:
+      supported_schemes: [bearer]
+      realm: "Artifusion NPM Registry"
+
+    # Backend: Verdaccio NPM Registry
+    # No authentication required - backend is on private network
+    backend:
+      name: verdaccio
+      url: http://verdaccio:4873
+      max_idle_conns: 200
+      max_idle_conns_per_host: 100
+      idle_conn_timeout: 90s
+      dial_timeout: 10s
+      request_timeout: 300s
+
+# ===== Logging =====
+logging:
+  # Log level: debug, info, warn, error
+  # Override with: ARTIFUSION_LOGGING_LEVEL
+  level: info
+
+  # Log format:
+  #   console (default) - Colorful, human-readable logs with auto-detected TTY support
+  #                     - Colors automatically disabled when piped to files or non-TTY outputs
+  #                     - Best for development and production monitoring
+  #                     - Example: [15:04:05.000] | INF | Server starting  port=8080
+  #
+  #   json            - Structured JSON logs for log aggregation systems
+  #                     - Use with ELK Stack, Splunk, CloudWatch, Datadog, etc.
+  #                     - Example: {"level":"info","time":"2025-10-18T15:04:05Z","message":"Server starting","port":8080}
+  #
+  # Override with: ARTIFUSION_LOGGING_FORMAT
+  format: console
+
+  # Debug options
+  include_headers: false  # Include HTTP headers in logs
+  include_body: false     # Include request/response bodies (WARNING: may log sensitive data)
+
+# ===== Metrics (Prometheus) =====
+metrics:
+  enabled: true
+  path: /metrics
+
+# ===== Health Checks =====
+health:
+  livenessPath: /health
+  readinessPath: /ready
+  checkTimeout: 5s

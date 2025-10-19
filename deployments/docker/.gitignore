@@ -1,0 +1,10 @@
+# Environment files
+.env
+
+# Authentication files - should be generated locally
+config/registry-auth/htpasswd
+config/registry-auth/registry.htpasswd
+
+# Local testing files
+*.test
+.env.test

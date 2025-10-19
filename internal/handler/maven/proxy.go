@@ -1,0 +1,117 @@
+package maven
+
+import (
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/mainuli/artifusion/internal/config"
+	"github.com/mainuli/artifusion/internal/proxy"
+)
+
+// proxyWithRewriting proxies the request to the backend with URL rewriting
+func (h *Handler) proxyWithRewriting(w http.ResponseWriter, r *http.Request, backend *config.MavenBackendConfig) error {
+	// Strip path prefix before sending to backend
+	path := r.URL.Path
+	if h.config.PathPrefix != "" {
+		path = strings.TrimPrefix(path, h.config.PathPrefix)
+		// Ensure path starts with /
+		if path == "" || !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+	}
+
+	// Create proxy request
+	proxyReq := &proxy.Request{
+		Method:      r.Method,
+		Path:        path,
+		Query:       r.URL.RawQuery,
+		Body:        r.Body,
+		Headers:     r.Header,
+		Backend:     backend,
+		OriginalReq: r,
+	}
+
+	// Track backend request timing
+	start := time.Now()
+
+	// Execute proxy request
+	resp, err := h.proxyClient.ProxyRequest(proxyReq)
+
+	// Record metrics regardless of success/failure
+	duration := time.Since(start)
+
+	if err != nil {
+		// Record backend error metrics
+		h.metrics.RecordBackendError(h.Name(), backend.Name, "network_error")
+		h.metrics.RecordBackendLatency(backend.Name, r.Method, duration)
+		h.metrics.SetBackendHealth(backend.Name, false)
+
+		h.logger.Error().Err(err).
+			Str("backend", backend.Name).
+			Dur("duration", duration).
+			Msg("Backend request failed")
+
+		return err
+	}
+
+	// Record backend latency for all requests
+	h.metrics.RecordBackendLatency(backend.Name, r.Method, duration)
+
+	// Record backend health based on status code
+	if resp.StatusCode >= 500 {
+		// Server error - backend is unhealthy
+		h.metrics.RecordBackendErrorByStatus(backend.Name, resp.StatusCode)
+		h.metrics.SetBackendHealth(backend.Name, false)
+	} else if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+		// Success - backend is healthy
+		h.metrics.SetBackendHealth(backend.Name, true)
+	}
+	// 4xx errors don't affect backend health (client errors)
+
+	// Determine proxy URL for rewriting (base URL + path prefix)
+	proxyURL := h.determineProxyURL(r)
+
+	// Rewrite Location header (for redirects)
+	if location := resp.Headers.Get("Location"); location != "" {
+		rewritten := h.rewriteURL(
+			location,
+			h.config.Backend.URL,
+			h.config.Backend.URL,
+			proxyURL,
+		)
+		resp.Headers.Set("Location", rewritten)
+	}
+
+	// Get content type
+	contentType := resp.Headers.Get("Content-Type")
+
+	// Check if we should rewrite the body
+	if h.shouldRewriteBody(contentType) {
+		// Buffer and rewrite text content (XML, POM files, metadata)
+		body, err := h.proxyClient.ReadResponseBody(resp)
+		if err != nil {
+			// Close response body before returning to prevent resource leak
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				h.logger.Warn().Err(closeErr).Msg("Failed to close response body after read error")
+			}
+			w.WriteHeader(resp.StatusCode)
+			return err
+		}
+
+		// Rewrite URLs in body
+		rewritten := h.rewriteBody(
+			body,
+			h.config.Backend.URL,
+			h.config.Backend.URL,
+			proxyURL,
+		)
+
+		// Write modified response
+		return h.proxyClient.WriteResponse(w, resp, rewritten, true)
+	}
+
+	// Stream binary content (JARs, WARs, etc.) without modification
+	_, err = h.proxyClient.StreamResponse(w, resp, true)
+	return err
+}
