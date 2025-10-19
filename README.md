@@ -114,7 +114,7 @@ For detailed architecture documentation, see **[FINAL_ARCHITECTURE_SUMMARY.md](d
 
 ```bash
 # Optional (if not set, any valid GitHub PAT is allowed)
-export ARTIFUSION_GITHUB_REQUIREDORG="your-organization"
+export ARTIFUSION_GITHUB_REQUIRED_ORG="your-organization"
 
 # Optional (with defaults)
 export ARTIFUSION_SERVER_PORT="8080"
@@ -296,7 +296,7 @@ spec:
         ports:
         - containerPort: 8080
         env:
-        - name: ARTIFUSION_GITHUB_REQUIREDORG
+        - name: ARTIFUSION_GITHUB_REQUIRED_ORG
           valueFrom:
             secretKeyRef:
               name: artifusion
@@ -427,7 +427,7 @@ Invalid token formats are rejected immediately (<1ms) without GitHub API calls, 
 - ✅ Token hashing - Never stores plaintext tokens
 - ✅ **Multi-token support** - PATs and GitHub Actions tokens
 - ✅ Security headers - HSTS, CSP, X-Frame-Options, etc.
-- ✅ Non-root container - Runs as UID 1000
+- ✅ Non-root container - Runs as UID 65532
 - ✅ Structured errors - No information leakage
 - ✅ Rate limiting - Global and per-user protection
 - ✅ Request timeout - Prevents resource exhaustion

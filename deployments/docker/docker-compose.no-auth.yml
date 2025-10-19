@@ -15,9 +15,9 @@ services:
       - ./config/artifusion.yaml:/etc/artifusion/config.yaml:ro
     environment:
       # GitHub authentication
-      ARTIFUSION_GITHUB_REQUIREDORG: ${GITHUB_ORG}
-      ARTIFUSION_GITHUB_REQUIREDTEAMS: ${GITHUB_TEAMS}
-      ARTIFUSION_GITHUB_AUTHCACHETTL: ${AUTH_CACHE_TTL:-30m}
+      ARTIFUSION_GITHUB_REQUIRED_ORG: ${GITHUB_ORG}
+      ARTIFUSION_GITHUB_REQUIRED_TEAMS: ${GITHUB_TEAMS}
+      ARTIFUSION_GITHUB_AUTH_CACHE_TTL: ${AUTH_CACHE_TTL:-30m}
 
       # Logging
       ARTIFUSION_LOGGING_LEVEL: ${LOG_LEVEL:-info}

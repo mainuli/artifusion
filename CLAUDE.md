@@ -297,9 +297,8 @@ Any config field can be overridden with pattern: `ARTIFUSION_<SECTION>_<KEY>` wh
 - Existing underscores in config keys are preserved
 
 Examples:
-- `ARTIFUSION_GITHUB_REQUIREDORG` overrides `github.required_org`
-- `ARTIFUSION_GITHUB_APIURL` overrides `github.api_url`
-- `ARTIFUSION_GITHUB_API_URL` also works (uppercase version with underscore)
+- `ARTIFUSION_GITHUB_REQUIRED_ORG` overrides `github.required_org`
+- `ARTIFUSION_GITHUB_API_URL` overrides `github.api_url`
 - `ARTIFUSION_GITHUB_AUTH_CACHE_TTL` overrides `github.auth_cache_ttl`
 - `ARTIFUSION_SERVER_PORT` overrides `server.port`
 - `ARTIFUSION_SERVER_MAX_CONCURRENT_REQUESTS` overrides `server.max_concurrent_requests`

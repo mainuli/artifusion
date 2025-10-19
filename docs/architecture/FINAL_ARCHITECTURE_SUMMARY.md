@@ -308,7 +308,7 @@ curl http://localhost:8080/metrics
 
 ```bash
 # Required
-export ARTIFUSION_GITHUB_REQUIREDORG="your-org"
+export ARTIFUSION_GITHUB_REQUIRED_ORG="your-org"
 export ARTIFUSION_SERVER_PORT="8080"
 
 # Optional
@@ -328,7 +328,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - ARTIFUSION_GITHUB_REQUIREDORG=myorg
+      - ARTIFUSION_GITHUB_REQUIRED_ORG=myorg
     volumes:
       - ./config.yaml:/etc/artifusion/config.yaml:ro
     healthcheck:
@@ -361,7 +361,7 @@ spec:
         ports:
         - containerPort: 8080
         env:
-        - name: ARTIFUSION_GITHUB_REQUIREDORG
+        - name: ARTIFUSION_GITHUB_REQUIRED_ORG
           valueFrom:
             secretKeyRef:
               name: artifusion-config
