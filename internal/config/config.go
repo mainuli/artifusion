@@ -225,6 +225,7 @@ type CircuitBreakerConfig struct {
 type LoggingConfig struct {
 	Level          string `mapstructure:"level"`
 	Format         string `mapstructure:"format"`
+	ForceColor     bool   `mapstructure:"force_color"`
 	IncludeHeaders bool   `mapstructure:"include_headers"`
 	IncludeBody    bool   `mapstructure:"include_body"`
 }

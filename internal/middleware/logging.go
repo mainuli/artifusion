@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -9,7 +10,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// responseWriter wraps http.ResponseWriter to capture status code and bytes written
+// responseWriter wraps http.ResponseWriter to capture status and bytes written
 type responseWriter struct {
 	http.ResponseWriter
 	status       int
@@ -69,13 +70,13 @@ func Logger(logger zerolog.Logger, includeHeaders bool, _ bool) func(http.Handle
 
 			// Get request ID from context
 			requestID := GetRequestID(r.Context())
+			clientIP := utils.GetClientIP(r)
 
-			// Log request start
+			// Log request start - format: IP "METHOD /path" request_id=... user_agent=...
+			requestLine := fmt.Sprintf("%s \"%s %s\"", clientIP, r.Method, r.URL.Path)
+
 			event := logger.Info().
 				Str("request_id", requestID).
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
-				Str("remote_addr", utils.GetClientIP(r)).
 				Str("user_agent", r.UserAgent())
 
 			if includeHeaders {
@@ -83,7 +84,7 @@ func Logger(logger zerolog.Logger, includeHeaders bool, _ bool) func(http.Handle
 				event = event.Interface("headers", sanitizeHeaders(r.Header))
 			}
 
-			event.Msg("Request started")
+			event.Msg(requestLine)
 
 			// Process request
 			next.ServeHTTP(wrapped, r)
@@ -94,15 +95,15 @@ func Logger(logger zerolog.Logger, includeHeaders bool, _ bool) func(http.Handle
 			// Get username from context if authenticated
 			username := GetUsername(r.Context())
 
-			// Log request completion
+			// Log request completion - format: IP "METHOD /path" status=200 duration=0.16ms bytes=107
+			completionLine := fmt.Sprintf("%s \"%s %s\"", clientIP, r.Method, r.URL.Path)
+
 			completionEvent := logger.Info().
 				Str("request_id", requestID).
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
 				Int("status", wrapped.status).
-				Int64("bytes_written", wrapped.bytesWritten).
-				Dur("duration_ms", duration).
-				Str("remote_addr", utils.GetClientIP(r))
+				Dur("duration", duration).
+				Int64("bytes", wrapped.bytesWritten).
+				Str("user_agent", r.UserAgent())
 
 			if username != "" {
 				completionEvent = completionEvent.Str("username", username)
@@ -110,11 +111,11 @@ func Logger(logger zerolog.Logger, includeHeaders bool, _ bool) func(http.Handle
 
 			// Add status-based level
 			if wrapped.status >= 500 {
-				completionEvent.Msg("Request completed with server error")
+				completionEvent.Msg(completionLine)
 			} else if wrapped.status >= 400 {
-				completionEvent.Msg("Request completed with client error")
+				completionEvent.Msg(completionLine)
 			} else {
-				completionEvent.Msg("Request completed successfully")
+				completionEvent.Msg(completionLine)
 			}
 		})
 	}

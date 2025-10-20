@@ -90,4 +90,5 @@ data:
     logging:
       level: {{ .Values.artifusion.config.logging.level | quote }}
       format: {{ .Values.artifusion.config.logging.format | quote }}
+      force_color: {{ .Values.artifusion.config.logging.force_color }}
 {{- end }}

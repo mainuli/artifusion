@@ -69,8 +69,9 @@ func main() {
 	// This allows config file to override environment variables
 	logger := logging.NewLogger(
 		logging.Config{
-			Level:  cfg.Logging.Level,
-			Format: cfg.Logging.Format,
+			Level:      cfg.Logging.Level,
+			Format:     cfg.Logging.Format,
+			ForceColor: cfg.Logging.ForceColor,
 		},
 		"artifusion",
 		version,
