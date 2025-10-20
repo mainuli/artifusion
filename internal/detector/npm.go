@@ -5,6 +5,20 @@ import (
 	"strings"
 )
 
+// npmEndpoints contains NPM-specific endpoint patterns
+// Declared at package level to avoid repeated allocations
+var npmEndpoints = []string{
+	"/-/ping",             // NPM registry health check
+	"/-/whoami",           // NPM user info
+	"/-/v1/search",        // NPM package search
+	"/-/user/",            // User authentication
+	"/-/npm/v1/",          // NPM API v1
+	"/-/package/",         // Package metadata
+	"/-/all",              // All packages listing
+	"/-/v1/login",         // NPM login endpoint
+	"/-/npm/v1/security/", // Security advisories
+}
+
 // NPMDetector detects NPM registry protocol requests
 type NPMDetector struct {
 	host       string
@@ -50,45 +64,40 @@ func (d *NPMDetector) Detect(r *http.Request) bool {
 		}
 	}
 
-	// Check 1: NPM-specific endpoints
-	npmEndpoints := []string{
-		"/-/ping",             // NPM registry health check
-		"/-/whoami",           // NPM user info
-		"/-/v1/search",        // NPM package search
-		"/-/user/",            // User authentication
-		"/-/npm/v1/",          // NPM API v1
-		"/-/package/",         // Package metadata
-		"/-/all",              // All packages listing
-		"/-/v1/login",         // NPM login endpoint
-		"/-/npm/v1/security/", // Security advisories
-	}
-
+	// Check 2: NPM-specific endpoints
 	for _, endpoint := range npmEndpoints {
 		if strings.Contains(path, endpoint) {
 			return true
 		}
 	}
 
-	// Check 2: Scoped package pattern (@scope/package)
+	// Check 3: Scoped package pattern (@scope/package)
 	if strings.Contains(path, "/@") {
 		return true
 	}
 
-	// Check 3: NPM-specific Accept headers with User-Agent confirmation
+	// Check 4: NPM-specific Accept headers
 	accept := r.Header.Get("Accept")
 	if strings.Contains(accept, "application/vnd.npm.install-v1+json") {
 		// NPM-specific Accept header - strong indicator
 		return true
 	}
 
-	// Check 4: User-Agent header (NPM package managers) with path validation
+	// Check 5: User-Agent header (NPM package managers) with path validation
 	userAgent := r.Header.Get("User-Agent")
 	if strings.Contains(userAgent, "npm/") ||
 		strings.Contains(userAgent, "yarn/") ||
 		strings.Contains(userAgent, "pnpm/") {
 		// Also check if the path looks like an NPM package request
-		// NPM package paths: /package-name or /@scope/package-name
-		parts := strings.Split(strings.Trim(path, "/"), "/")
+		// NPM package paths: /package-name or /@scope/package-name or /package/-/tarball.tgz
+
+		// Strip path prefix before analyzing package name
+		packagePath := path
+		if d.pathPrefix != "" {
+			packagePath = strings.TrimPrefix(path, d.pathPrefix)
+		}
+
+		parts := strings.Split(strings.Trim(packagePath, "/"), "/")
 		if len(parts) >= 1 {
 			// Check for package name pattern
 			firstPart := parts[0]
@@ -99,10 +108,14 @@ func (d *NPMDetector) Detect(r *http.Request) bool {
 			if len(parts) == 1 && !strings.Contains(firstPart, ".") && len(firstPart) > 0 && len(firstPart) < 214 {
 				return true
 			}
+			// NPM tarball path: /package/-/package-version.tgz or /@scope/package/-/package-version.tgz
+			if len(parts) >= 3 && parts[len(parts)-2] == "-" && strings.HasSuffix(packagePath, ".tgz") {
+				return true
+			}
 		}
 	}
 
-	// Check 5: Content-Type header for package publish requests with User-Agent
+	// Check 6: Content-Type header for package publish requests with User-Agent
 	contentType := r.Header.Get("Content-Type")
 	if strings.Contains(contentType, "application/json") && r.Method == http.MethodPut {
 		// Publishing packages uses PUT with JSON content
@@ -115,7 +128,7 @@ func (d *NPMDetector) Detect(r *http.Request) bool {
 		}
 	}
 
-	// Check 6: NPM-specific query parameters
+	// Check 7: NPM-specific query parameters
 	query := r.URL.Query()
 	if query.Get("write") == "true" || // NPM publish operation
 		query.Has("dist-tags") { // NPM dist-tags operation

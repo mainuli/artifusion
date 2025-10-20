@@ -16,6 +16,10 @@ const (
 	MaxRecursionDepth = 10
 )
 
+// urlFields contains common NPM registry URL fields that should be rewritten
+// Declared at package level to avoid repeated allocations during recursion
+var urlFields = []string{"tarball", "url", "homepage", "repository", "bugs"}
+
 // determineProxyURL determines the proxy URL for NPM handler
 // Constructs URL dynamically from request headers + protocol config
 // Returns the full proxy URL including the path prefix (e.g., https://npm.example.com/npm)
@@ -125,20 +129,37 @@ func (h *Handler) rewritePackageMetadata(data map[string]interface{}, backendURL
 	}
 
 	// Targeted rewriting: only rewrite known URL fields to avoid expensive iteration
-	// Common NPM registry URL fields
-	urlFields := []string{"tarball", "url", "homepage", "repository", "bugs"}
+	// Use scheme-agnostic matching to handle http/https mismatches
+	backendHost := extractHostFromURL(backendURL)
 	for _, field := range urlFields {
-		if strValue, ok := data[field].(string); ok && strings.HasPrefix(strValue, backendURL) {
-			data[field] = h.rewriteURL(strValue, backendURL, proxyURL)
+		if strValue, ok := data[field].(string); ok {
+			if strings.Contains(strValue, backendHost) {
+				data[field] = h.rewriteURL(strValue, backendURL, proxyURL)
+			}
 		}
 	}
 }
 
 // rewriteURL rewrites a single URL from backend to proxy
 func (h *Handler) rewriteURL(url, backendURL, proxyURL string) string {
-	// Replace backend URL with proxy URL
-	if strings.HasPrefix(url, backendURL) {
-		rewritten := strings.Replace(url, backendURL, proxyURL, 1)
+	// Extract host:port from backend URL (scheme-agnostic)
+	// Backend might be http://artifusion-verdaccio:4873
+	// But Verdaccio might return https://artifusion-verdaccio:4873
+	backendHost := extractHostFromURL(backendURL)
+
+	// Check if URL contains the backend host (scheme-agnostic)
+	if strings.Contains(url, backendHost) {
+		// Replace with proxy URL, preserving everything after the host:port
+		// Check which scheme is present to avoid redundant replacements
+		var rewritten string
+		if strings.Contains(url, "http://"+backendHost) {
+			rewritten = strings.Replace(url, "http://"+backendHost, proxyURL, 1)
+		} else if strings.Contains(url, "https://"+backendHost) {
+			rewritten = strings.Replace(url, "https://"+backendHost, proxyURL, 1)
+		} else {
+			// Host found without scheme prefix, return as-is
+			return url
+		}
 
 		h.logger.Debug().
 			Str("original", url).
@@ -155,8 +176,12 @@ func (h *Handler) rewriteURL(url, backendURL, proxyURL string) string {
 // rewriteBody is a simpler fallback method for text-based rewriting
 // Used when JSON parsing fails but content is still text
 func (h *Handler) rewriteBody(body []byte, backendURL, proxyURL string) []byte {
-	// Replace all occurrences of backend URL with proxy URL
-	rewritten := bytes.ReplaceAll(body, []byte(backendURL), []byte(proxyURL))
+	// Extract host:port from backend URL (scheme-agnostic)
+	backendHost := extractHostFromURL(backendURL)
+
+	// Replace all occurrences of backend host with proxy URL (both http and https)
+	rewritten := bytes.ReplaceAll(body, []byte("http://"+backendHost), []byte(proxyURL))
+	rewritten = bytes.ReplaceAll(rewritten, []byte("https://"+backendHost), []byte(proxyURL))
 
 	if !bytes.Equal(body, rewritten) {
 		h.logger.Debug().
@@ -177,4 +202,22 @@ func (h *Handler) shouldRewriteBody(contentType string) bool {
 		strings.Contains(contentType, "application/vnd.npm.install-v1+json") ||
 		strings.Contains(contentType, "text/plain") ||
 		strings.Contains(contentType, "text/html")
+}
+
+// extractHostFromURL extracts host:port from a URL, stripping the scheme, path, and query
+// This allows scheme-agnostic URL matching (http vs https)
+// Examples:
+//   - "http://host:8080/path?query" -> "host:8080"
+//   - "https://host" -> "host"
+func extractHostFromURL(url string) string {
+	// Strip scheme
+	host := strings.TrimPrefix(url, "http://")
+	host = strings.TrimPrefix(host, "https://")
+
+	// Strip path and query if present
+	if idx := strings.IndexAny(host, "/?#"); idx != -1 {
+		host = host[:idx]
+	}
+
+	return host
 }

@@ -56,6 +56,20 @@ func sanitizeHeaders(headers http.Header) map[string]interface{} {
 	return sanitized
 }
 
+// isHealthEndpoint checks if the request is for a health check endpoint
+func isHealthEndpoint(path string) bool {
+	return path == "/health" || path == "/ready"
+}
+
+// getLogEvent returns the appropriate log event based on the request path
+// Health endpoints use debug level, all others use info level
+func getLogEvent(logger zerolog.Logger, path string) *zerolog.Event {
+	if isHealthEndpoint(path) {
+		return logger.Debug()
+	}
+	return logger.Info()
+}
+
 // Logger creates a structured logging middleware
 func Logger(logger zerolog.Logger, includeHeaders bool, _ bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -75,7 +89,8 @@ func Logger(logger zerolog.Logger, includeHeaders bool, _ bool) func(http.Handle
 			// Log request start - format: IP "METHOD /path" request_id=... user_agent=...
 			requestLine := fmt.Sprintf("%s \"%s %s\"", clientIP, r.Method, r.URL.Path)
 
-			event := logger.Info().
+			// Use debug level for health endpoints, info level for others
+			event := getLogEvent(logger, r.URL.Path).
 				Str("request_id", requestID).
 				Str("user_agent", r.UserAgent())
 
@@ -98,7 +113,8 @@ func Logger(logger zerolog.Logger, includeHeaders bool, _ bool) func(http.Handle
 			// Log request completion - format: IP "METHOD /path" status=200 duration=0.16ms bytes=107
 			completionLine := fmt.Sprintf("%s \"%s %s\"", clientIP, r.Method, r.URL.Path)
 
-			completionEvent := logger.Info().
+			// Use debug level for health endpoints, info level for others
+			completionEvent := getLogEvent(logger, r.URL.Path).
 				Str("request_id", requestID).
 				Int("status", wrapped.status).
 				Dur("duration", duration).
@@ -109,14 +125,7 @@ func Logger(logger zerolog.Logger, includeHeaders bool, _ bool) func(http.Handle
 				completionEvent = completionEvent.Str("username", username)
 			}
 
-			// Add status-based level
-			if wrapped.status >= 500 {
-				completionEvent.Msg(completionLine)
-			} else if wrapped.status >= 400 {
-				completionEvent.Msg(completionLine)
-			} else {
-				completionEvent.Msg(completionLine)
-			}
+			completionEvent.Msg(completionLine)
 		})
 	}
 }

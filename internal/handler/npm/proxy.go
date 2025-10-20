@@ -1,7 +1,10 @@
 package npm
 
 import (
+	"bytes"
+	"compress/gzip"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -110,6 +113,16 @@ func (h *Handler) proxyWithRewriting(w http.ResponseWriter, r *http.Request, bac
 			return err
 		}
 
+		// Decompress gzip content if needed for URL rewriting
+		contentEncoding := resp.Headers.Get("Content-Encoding")
+		if decompressed, wasDecompressed := h.decompressIfNeeded(body, contentEncoding); wasDecompressed {
+			body = decompressed
+			// Remove Content-Encoding header since we decompressed
+			resp.Headers.Del("Content-Encoding")
+			// Also remove Content-Length since it will change after rewriting
+			resp.Headers.Del("Content-Length")
+		}
+
 		// Rewrite URLs in body
 		rewritten, err := h.rewritePackageJSON(
 			body,
@@ -132,4 +145,35 @@ func (h *Handler) proxyWithRewriting(w http.ResponseWriter, r *http.Request, bac
 	// StreamResponse handles body close
 	_, err = h.proxyClient.StreamResponse(w, resp, true)
 	return err
+}
+
+// decompressIfNeeded decompresses gzip-encoded content if needed
+// Returns the decompressed body and true if decompression occurred, or original body and false otherwise
+func (h *Handler) decompressIfNeeded(body []byte, contentEncoding string) ([]byte, bool) {
+	if contentEncoding != "gzip" {
+		return body, false
+	}
+
+	gzReader, err := gzip.NewReader(bytes.NewReader(body))
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("Failed to create gzip reader, using raw body")
+		return body, false
+	}
+
+	decompressed, err := io.ReadAll(gzReader)
+	if closeErr := gzReader.Close(); closeErr != nil {
+		h.logger.Warn().Err(closeErr).Msg("Failed to close gzip reader")
+	}
+
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("Failed to decompress gzip body, using raw body")
+		return body, false
+	}
+
+	h.logger.Debug().
+		Int("compressed_size", len(body)).
+		Int("decompressed_size", len(decompressed)).
+		Msg("Decompressed gzip response for rewriting")
+
+	return decompressed, true
 }
