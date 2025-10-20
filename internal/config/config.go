@@ -319,14 +319,22 @@ func (c *Config) SetDefaults() {
 		c.GitHub.RateLimitBuffer = DefaultRateLimitBuffer
 	}
 
-	// Rate limit defaults
-	if c.RateLimit.Enabled && c.RateLimit.RequestsPerSec == 0 {
-		c.RateLimit.RequestsPerSec = DefaultRateLimitRequestsPerSec
-		c.RateLimit.Burst = DefaultRateLimitBurst
+	// Rate limit defaults - each field independently checked for resilient partial configuration
+	if c.RateLimit.Enabled {
+		if c.RateLimit.RequestsPerSec == 0 {
+			c.RateLimit.RequestsPerSec = DefaultRateLimitRequestsPerSec
+		}
+		if c.RateLimit.Burst == 0 {
+			c.RateLimit.Burst = DefaultRateLimitBurst
+		}
 	}
-	if c.RateLimit.PerUserEnabled && c.RateLimit.PerUserRequests == 0 {
-		c.RateLimit.PerUserRequests = DefaultPerUserRequests
-		c.RateLimit.PerUserBurst = DefaultPerUserBurst
+	if c.RateLimit.PerUserEnabled {
+		if c.RateLimit.PerUserRequests == 0 {
+			c.RateLimit.PerUserRequests = DefaultPerUserRequests
+		}
+		if c.RateLimit.PerUserBurst == 0 {
+			c.RateLimit.PerUserBurst = DefaultPerUserBurst
+		}
 	}
 
 	// Protocol-specific backend defaults

@@ -52,9 +52,25 @@ func NewRateLimiter(cfg *config.RateLimitConfig) *RateLimiter {
 	return rl
 }
 
+// isInfrastructureEndpoint checks if a path is an infrastructure endpoint
+// that should be exempt from rate limiting (health checks, readiness, metrics).
+// These endpoints are called by Kubernetes probes and monitoring systems and
+// must remain accessible even under high load conditions.
+func isInfrastructureEndpoint(path string) bool {
+	return path == "/health" || path == "/ready" || path == "/metrics"
+}
+
 // Middleware returns a middleware handler that enforces rate limits
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip rate limiting for infrastructure endpoints
+		// This ensures Kubernetes health probes and Prometheus metrics
+		// are never blocked by rate limits
+		if isInfrastructureEndpoint(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// Check global rate limit first
 		if rl.config.Enabled && !rl.global.Allow() {
 			errors.ErrorResponse(w, errors.ErrGlobalRateLimitExceeded)

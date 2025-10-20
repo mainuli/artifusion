@@ -380,3 +380,144 @@ func TestRateLimiter_Stop(t *testing.T) {
 	// Note: Cannot call Stop multiple times as it closes a channel
 	// In production, Stop should only be called once during shutdown
 }
+
+// TestRateLimiter_InfrastructureEndpoints tests that health/ready/metrics endpoints
+// are exempt from rate limiting (critical for Kubernetes probes and monitoring)
+func TestRateLimiter_InfrastructureEndpoints(t *testing.T) {
+	// Configure very restrictive rate limits to ensure exemption is working
+	cfg := &config.RateLimitConfig{
+		Enabled:        true,
+		RequestsPerSec: 1, // Very low
+		Burst:          1, // Very low
+	}
+
+	rl := NewRateLimiter(cfg)
+	defer rl.Stop()
+
+	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	infrastructureEndpoints := []string{"/health", "/ready", "/metrics"}
+
+	// Make many requests to each infrastructure endpoint
+	// They should all succeed despite very low rate limit
+	for _, endpoint := range infrastructureEndpoints {
+		for i := 0; i < 100; i++ {
+			req := httptest.NewRequest("GET", endpoint, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Errorf("%s request %d: expected 200 (exempt from rate limit), got %d",
+					endpoint, i, rec.Code)
+			}
+		}
+	}
+
+	// Regular endpoint should still be rate limited
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("/api/test first request: expected 200, got %d", rec.Code)
+	}
+
+	// Second request to regular endpoint should be rate limited
+	req2 := httptest.NewRequest("GET", "/api/test", nil)
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Errorf("/api/test second request: expected 429 (rate limited), got %d", rec2.Code)
+	}
+}
+
+// TestIsInfrastructureEndpoint tests the helper function
+func TestIsInfrastructureEndpoint(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"/health", true},
+		{"/ready", true},
+		{"/metrics", true},
+		{"/v2/", false},
+		{"/maven/", false},
+		{"/npm/", false},
+		{"/api/test", false},
+		{"/health/extra", false},    // Not exact match
+		{"/ready/something", false}, // Not exact match
+		{"/healthz", false},         // Similar but not same
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got := isInfrastructureEndpoint(tt.path)
+			if got != tt.want {
+				t.Errorf("isInfrastructureEndpoint(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRateLimiter_InfrastructureEndpoints_WithPerUserLimit tests that infrastructure
+// endpoints bypass both global and per-user rate limits
+func TestRateLimiter_InfrastructureEndpoints_WithPerUserLimit(t *testing.T) {
+	cfg := &config.RateLimitConfig{
+		Enabled:         true,
+		RequestsPerSec:  1,
+		Burst:           1,
+		PerUserEnabled:  true,
+		PerUserRequests: 1,
+		PerUserBurst:    1,
+	}
+
+	rl := NewRateLimiter(cfg)
+	defer rl.Stop()
+
+	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Make many authenticated requests to /health
+	// Should all succeed despite per-user rate limit
+	for i := 0; i < 50; i++ {
+		req := httptest.NewRequest("GET", "/health", nil)
+		ctx := SetUsername(req.Context(), "testuser")
+		req = req.WithContext(ctx)
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("/health request %d: expected 200 (exempt from per-user rate limit), got %d",
+				i, rec.Code)
+		}
+	}
+
+	// But regular endpoint with same user should still be rate limited
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	ctx := SetUsername(req.Context(), "testuser")
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("/api/test first request: expected 200, got %d", rec.Code)
+	}
+
+	// Second request should be rate limited
+	req2 := httptest.NewRequest("GET", "/api/test", nil)
+	ctx2 := SetUsername(req2.Context(), "testuser")
+	req2 = req2.WithContext(ctx2)
+
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Errorf("/api/test second request: expected 429 (per-user rate limited), got %d", rec2.Code)
+	}
+}

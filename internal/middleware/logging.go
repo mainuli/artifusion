@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mainuli/artifusion/internal/utils"
 	"github.com/rs/zerolog"
 )
 
@@ -74,7 +75,7 @@ func Logger(logger zerolog.Logger, includeHeaders bool, _ bool) func(http.Handle
 				Str("request_id", requestID).
 				Str("method", r.Method).
 				Str("path", r.URL.Path).
-				Str("remote_addr", r.RemoteAddr).
+				Str("remote_addr", utils.GetClientIP(r)).
 				Str("user_agent", r.UserAgent())
 
 			if includeHeaders {
@@ -101,7 +102,7 @@ func Logger(logger zerolog.Logger, includeHeaders bool, _ bool) func(http.Handle
 				Int("status", wrapped.status).
 				Int64("bytes_written", wrapped.bytesWritten).
 				Dur("duration_ms", duration).
-				Str("remote_addr", r.RemoteAddr)
+				Str("remote_addr", utils.GetClientIP(r))
 
 			if username != "" {
 				completionEvent = completionEvent.Str("username", username)

@@ -30,23 +30,23 @@ spec:
       initContainers:
         {{- if .Values.registry.enabled }}
         - name: wait-for-registry
-          image: cgr.dev/chainguard/busybox:latest
-          command: ['sh', '-c', 'until nc -z {{ include "artifusion.registry.serviceName" . }} 5000; do echo waiting for registry; sleep 2; done']
+          image: cgr.dev/chainguard/wait-for-it:latest
+          args: ['{{ include "artifusion.registry.serviceName" . }}:5000', '-t', '60']
         {{- end }}
         {{- if .Values.ociRegistry.enabled }}
         - name: wait-for-oci-registry
-          image: cgr.dev/chainguard/busybox:latest
-          command: ['sh', '-c', 'until nc -z {{ include "artifusion.ociRegistry.serviceName" . }} 8080; do echo waiting for oci-registry; sleep 2; done']
+          image: cgr.dev/chainguard/wait-for-it:latest
+          args: ['{{ include "artifusion.ociRegistry.serviceName" . }}:8080', '-t', '60']
         {{- end }}
         {{- if .Values.reposilite.enabled }}
         - name: wait-for-reposilite
-          image: cgr.dev/chainguard/busybox:latest
-          command: ['sh', '-c', 'until nc -z {{ include "artifusion.reposilite.serviceName" . }} 8080; do echo waiting for reposilite; sleep 2; done']
+          image: cgr.dev/chainguard/wait-for-it:latest
+          args: ['{{ include "artifusion.reposilite.serviceName" . }}:8080', '-t', '60']
         {{- end }}
         {{- if .Values.verdaccio.enabled }}
         - name: wait-for-verdaccio
-          image: cgr.dev/chainguard/busybox:latest
-          command: ['sh', '-c', 'until nc -z {{ include "artifusion.verdaccio.serviceName" . }} 4873; do echo waiting for verdaccio; sleep 2; done']
+          image: cgr.dev/chainguard/wait-for-it:latest
+          args: ['{{ include "artifusion.verdaccio.serviceName" . }}:4873', '-t', '60']
         {{- end }}
       {{- end }}
       containers:
