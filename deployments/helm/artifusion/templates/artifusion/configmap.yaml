@@ -31,7 +31,6 @@ data:
         {{- else }}
         host: ""
         {{- end }}
-        path_prefix: {{ .Values.artifusion.config.protocols.oci.path_prefix | quote }}
         pull_backends:
           - name: "local-hosted"
             url: "http://{{ include "artifusion.registry.serviceName" . }}:5000"

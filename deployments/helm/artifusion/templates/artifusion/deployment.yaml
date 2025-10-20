@@ -21,11 +21,34 @@ spec:
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
+        {{- include "artifusion.imagePullSecrets" . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.artifusion.podSecurityContext | nindent 8 }}
+      {{- if or .Values.registry.enabled .Values.ociRegistry.enabled .Values.reposilite.enabled .Values.verdaccio.enabled }}
+      initContainers:
+        {{- if .Values.registry.enabled }}
+        - name: wait-for-registry
+          image: cgr.dev/chainguard/busybox:latest
+          command: ['sh', '-c', 'until nc -z {{ include "artifusion.registry.serviceName" . }} 5000; do echo waiting for registry; sleep 2; done']
+        {{- end }}
+        {{- if .Values.ociRegistry.enabled }}
+        - name: wait-for-oci-registry
+          image: cgr.dev/chainguard/busybox:latest
+          command: ['sh', '-c', 'until nc -z {{ include "artifusion.ociRegistry.serviceName" . }} 8080; do echo waiting for oci-registry; sleep 2; done']
+        {{- end }}
+        {{- if .Values.reposilite.enabled }}
+        - name: wait-for-reposilite
+          image: cgr.dev/chainguard/busybox:latest
+          command: ['sh', '-c', 'until nc -z {{ include "artifusion.reposilite.serviceName" . }} 8080; do echo waiting for reposilite; sleep 2; done']
+        {{- end }}
+        {{- if .Values.verdaccio.enabled }}
+        - name: wait-for-verdaccio
+          image: cgr.dev/chainguard/busybox:latest
+          command: ['sh', '-c', 'until nc -z {{ include "artifusion.verdaccio.serviceName" . }} 4873; do echo waiting for verdaccio; sleep 2; done']
+        {{- end }}
+      {{- end }}
       containers:
         - name: artifusion
           securityContext:

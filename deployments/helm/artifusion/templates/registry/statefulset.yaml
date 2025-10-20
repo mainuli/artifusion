@@ -20,7 +20,7 @@ spec:
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
+        {{- include "artifusion.imagePullSecrets" . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
       containers:
@@ -61,6 +61,8 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: data
+        annotations:
+          helm.sh/resource-policy: keep
       spec:
         accessModes: [ {{ .Values.registry.storage.accessMode | quote }} ]
         {{- if .Values.registry.storage.storageClass }}

@@ -20,9 +20,25 @@ spec:
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
+        {{- include "artifusion.imagePullSecrets" . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
+      initContainers:
+        - name: copy-config
+          image: cgr.dev/chainguard/busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /app/data
+              cp /config/configuration.cdn /app/data/configuration.cdn
+              echo "Configuration copied to /app/data/configuration.cdn"
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: data
+              mountPath: /app/data
       containers:
         - name: reposilite
           image: {{ include "artifusion.reposilite.image" . }}
@@ -31,23 +47,22 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
-          {{- if .Values.artifusion.config.github.required_org }}
           env:
-            - name: GITHUB_TOKEN
+            - name: GITHUB_PACKAGES_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "artifusion.reposilite.serviceName" . }}-secret
                   key: github-token
-          {{- end }}
+                  optional: true
           livenessProbe:
             httpGet:
-              path: /api/status
+              path: /
               port: http
             initialDelaySeconds: 30
             periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /api/status
+              path: /
               port: http
             initialDelaySeconds: 10
             periodSeconds: 5
@@ -56,10 +71,15 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/data
-      volumes: []
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "artifusion.reposilite.serviceName" . }}
   volumeClaimTemplates:
     - metadata:
         name: data
+        annotations:
+          helm.sh/resource-policy: keep
       spec:
         accessModes: [ {{ .Values.reposilite.storage.accessMode | quote }} ]
         {{- if .Values.reposilite.storage.storageClass }}

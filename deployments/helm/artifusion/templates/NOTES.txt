@@ -8,8 +8,9 @@ Artifusion is a multi-protocol artifact reverse proxy with GitHub authentication
 
 🌐 Ingress URLs:
 {{- range .Values.ingress.hosts }}
+  {{- $host := .host }}
   {{- range .paths }}
-  - https://{{ .host }}{{ .path }}
+  - https://{{ $host }}{{ .path }}
   {{- end }}
 {{- end }}
 
@@ -41,13 +42,30 @@ Visit http://127.0.0.1:8080 to access Artifusion.
 
 📦 Enabled Protocols:
 {{- if .Values.artifusion.config.protocols.oci.enabled }}
-  - OCI/Docker: {{ .Values.artifusion.config.protocols.oci.path_prefix }}
+  - OCI/Docker: /v2 (fixed per OCI spec)
 {{- end }}
 {{- if .Values.artifusion.config.protocols.maven.enabled }}
   - Maven:      {{ .Values.artifusion.config.protocols.maven.path_prefix }}
 {{- end }}
 {{- if .Values.artifusion.config.protocols.npm.enabled }}
   - NPM:        {{ .Values.artifusion.config.protocols.npm.path_prefix }}
+{{- end }}
+
+🔧 Backend Services:
+{{- if .Values.ociRegistry.enabled }}
+  - OCI Registry:   ENABLED (pull-through cache for GHCR/Docker Hub)
+{{- end }}
+{{- if .Values.registry.enabled }}
+  - Docker Registry: ENABLED (hosted registry for push operations)
+{{- end }}
+{{- if .Values.reposilite.enabled }}
+  - Reposilite:     ENABLED (Maven repository manager)
+{{- end }}
+{{- if .Values.verdaccio.enabled }}
+  - Verdaccio:      ENABLED (NPM registry cache)
+{{- end }}
+{{- if not (or .Values.ociRegistry.enabled .Values.registry.enabled .Values.reposilite.enabled .Values.verdaccio.enabled) }}
+  ⚠️  WARNING: No backends enabled! Artifusion requires at least one backend.
 {{- end }}
 
 🔐 Authentication:
@@ -75,6 +93,33 @@ To enable GitHub Packages and GHCR pull-through cache, set:
 
 🧪 Test the deployment:
   helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }}
+
+💾 Persistent Volume Claims (PVCs):
+All backend storage PVCs are configured to be RETAINED on helm uninstall.
+This preserves your cached artifacts and repository data.
+
+List PVCs in this namespace:
+  kubectl get pvc -n {{ .Release.Namespace }}
+
+PVC naming convention:
+{{- if .Values.ociRegistry.enabled }}
+  - data-{{ include "artifusion.ociRegistry.serviceName" . }}-0
+{{- end }}
+{{- if .Values.registry.enabled }}
+  - data-{{ include "artifusion.registry.serviceName" . }}-0
+{{- end }}
+{{- if .Values.reposilite.enabled }}
+  - data-{{ include "artifusion.reposilite.serviceName" . }}-0
+{{- end }}
+{{- if .Values.verdaccio.enabled }}
+  - data-{{ include "artifusion.verdaccio.serviceName" . }}-0
+{{- end }}
+
+When reinstalling with the same release name, existing PVCs will be
+automatically reused, preserving your data.
+
+To manually delete PVCs (WARNING: This deletes all cached data):
+  kubectl delete pvc -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
 
 📚 Documentation:
   https://github.com/mainuli/artifusion

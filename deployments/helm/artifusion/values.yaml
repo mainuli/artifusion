@@ -86,8 +86,7 @@ artifusion:
       ## OCI/Docker Registry protocol
       oci:
         enabled: true
-        host: ""  # Set for host-based routing (e.g., "docker.example.com"), leave empty for path-based
-        path_prefix: "/oci"  # Required if host is empty
+        host: ""  # Optional: Set for host-based routing (e.g., "docker.example.com"). OCI always uses /v2 path per OCI Distribution Spec.
         pull_backends:
           - name: "local-hosted"
             url: "http://RELEASE_NAME-registry:5000"  # Will be replaced in template
@@ -484,12 +483,34 @@ ingress:
         - npm.example.com
 
   ## @param ingress.annotations Ingress annotations
+  ## Default annotations are optimized for artifact proxy use case (large files, long transfers)
+  ## These defaults assume nginx ingress controller.
+  ##
+  ## To ADD additional annotations, use helm -f or --set (annotations will be merged):
+  ##   helm install artifusion ./artifusion --set ingress.annotations.custom/key=value
+  ##
+  ## To COMPLETELY REPLACE annotations (for other ingress controllers), set ALL annotations:
+  ##   annotations:
+  ##     traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
+  ##     traefik.ingress.kubernetes.io/router.middlewares: "default-ratelimit@kubernetescrd"
+  ##
+  ## Or remove nginx defaults explicitly in your values file:
+  ##   annotations:
+  ##     nginx.ingress.kubernetes.io/proxy-body-size: null
+  ##     haproxy.org/timeout-client: "600s"
+  ##
   annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    nginx.ingress.kubernetes.io/proxy-body-size: "0"  # Unlimited
+    # Unlimited request body size - required for large artifact uploads (Docker images, JARs, etc.)
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    # Extended timeouts (10 minutes) - required for large artifact downloads/uploads
     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    # Disable buffering - enables streaming for large files
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # Force HTTPS redirect for security
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Uncomment to enable cert-manager automatic TLS certificate provisioning:
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
 
 ## @section Network Policy parameters
 

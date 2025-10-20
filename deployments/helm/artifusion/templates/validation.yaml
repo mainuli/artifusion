@@ -1,0 +1,20 @@
+{{/*
+Validation checks for Artifusion Helm chart.
+These validations run at template-time (helm install/upgrade) and will fail deployment if conditions are not met.
+*/}}
+
+{{/*
+Validation: At least one backend must be enabled.
+Artifusion requires at least one backend service to function properly.
+*/}}
+{{- if not (or .Values.ociRegistry.enabled .Values.registry.enabled .Values.reposilite.enabled .Values.verdaccio.enabled) }}
+  {{- fail "\n\n❌ VALIDATION FAILED: At least one backend must be enabled for Artifusion to operate.\n\nAvailable backends:\n  • ociRegistry.enabled  - OCI pull-through cache for GHCR/Docker Hub (supports Docker pulls)\n  • registry.enabled     - Hosted Docker Registry for push operations\n  • reposilite.enabled   - Maven repository manager (supports Maven Central, GitHub Packages)\n  • verdaccio.enabled    - NPM registry cache (supports npmjs.org, GitHub Packages)\n\nTo fix this error, enable at least one backend in your values file:\n\n  helm install artifusion ./artifusion \\\n    --set ociRegistry.enabled=true\n\nOr enable multiple backends:\n\n  helm install artifusion ./artifusion \\\n    --set ociRegistry.enabled=true \\\n    --set registry.enabled=true \\\n    --set reposilite.enabled=true \\\n    --set verdaccio.enabled=true\n\nFor more information, see: https://github.com/mainuli/artifusion\n" }}
+{{- end }}
+
+{{/*
+Validation: OCI protocol does not support path_prefix.
+The OCI Distribution Specification mandates /v2 as the fixed API endpoint.
+*/}}
+{{- if .Values.artifusion.config.protocols.oci.path_prefix }}
+  {{- fail "\n\n❌ VALIDATION FAILED: OCI protocol does not support path_prefix configuration.\n\nThe OCI Distribution Specification requires all API requests to use the /v2 endpoint.\nUnlike Maven and NPM protocols, OCI cannot use custom path prefixes.\n\nInvalid configuration:\n  protocols:\n    oci:\n      path_prefix: \"{{ .Values.artifusion.config.protocols.oci.path_prefix }}\"  # ❌ NOT SUPPORTED\n\nTo fix this error:\n  • Remove protocols.oci.path_prefix from your values file\n  • Use protocols.oci.host for host-based routing instead\n\nCorrect configuration (host-based routing):\n  protocols:\n    oci:\n      enabled: true\n      host: \"docker.example.com\"  # ✅ Route by domain\n      # path_prefix is not configurable - always uses /v2 per OCI spec\n\nOCI requests are automatically detected by the /v2 path prefix as required by the\nOCI Distribution Specification: https://github.com/opencontainers/distribution-spec\n" }}
+{{- end }}

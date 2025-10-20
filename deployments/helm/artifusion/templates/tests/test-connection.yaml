@@ -9,7 +9,7 @@ metadata:
 spec:
   containers:
     - name: wget
-      image: busybox:latest
+      image: cgr.dev/chainguard/busybox:latest
       command: ['sh', '-c']
       args:
         - |

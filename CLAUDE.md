@@ -247,8 +247,8 @@ Artifusion supports two deployment models controlled by configuration:
 ```yaml
 protocols:
   oci:
-    host: "docker.example.com"  # Set host
-    path_prefix: ""             # Root path or namespace prefix
+    host: "docker.example.com"  # Set host for OCI routing
+    # Note: OCI always uses /v2 path per OCI Distribution Spec (not configurable)
   maven:
     host: "maven.example.com"
     path_prefix: ""
@@ -258,12 +258,14 @@ protocols:
 ```yaml
 protocols:
   oci:
-    host: ""               # Leave empty
-    path_prefix: "/oci"    # REQUIRED when host is empty
+    host: ""               # Leave empty for path-based
+    # Note: OCI always uses /v2 path per OCI Distribution Spec (not configurable)
   maven:
     host: ""
     path_prefix: "/maven"  # REQUIRED when host is empty
 ```
+
+**Important**: Unlike Maven and NPM, the OCI protocol does **not** support custom `path_prefix` configuration. The OCI Distribution Specification mandates that all API requests use the `/v2` endpoint. Only the `host` field can be configured for host-based routing.
 
 ### Critical Configuration Fields
 

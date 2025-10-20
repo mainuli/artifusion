@@ -20,7 +20,7 @@ spec:
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
+        {{- include "artifusion.imagePullSecrets" . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
       containers:
@@ -31,14 +31,13 @@ spec:
             - name: http
               containerPort: 4873
               protocol: TCP
-          {{- if .Values.artifusion.config.github.required_org }}
           env:
             - name: NPM_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "artifusion.verdaccio.serviceName" . }}-secret
                   key: npm-token
-          {{- end }}
+                  optional: true
           livenessProbe:
             httpGet:
               path: /-/ping
@@ -57,7 +56,7 @@ spec:
             - name: config
               mountPath: /verdaccio/conf
               readOnly: true
-            - name: storage
+            - name: data
               mountPath: /verdaccio/storage
       volumes:
         - name: config
@@ -65,7 +64,9 @@ spec:
             name: {{ include "artifusion.verdaccio.serviceName" . }}
   volumeClaimTemplates:
     - metadata:
-        name: storage
+        name: data
+        annotations:
+          helm.sh/resource-policy: keep
       spec:
         accessModes: [ {{ .Values.verdaccio.storage.accessMode | quote }} ]
         {{- if .Values.verdaccio.storage.storageClass }}

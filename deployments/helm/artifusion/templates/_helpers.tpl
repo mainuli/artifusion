@@ -235,3 +235,17 @@ Service names
 {{- define "artifusion.verdaccio.serviceName" -}}
 {{- printf "%s-verdaccio" (include "artifusion.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
+
+{{/*
+Normalize imagePullSecrets to support both string and object formats
+Usage: {{ include "artifusion.imagePullSecrets" . | nindent 8 }}
+*/}}
+{{- define "artifusion.imagePullSecrets" -}}
+{{- range . }}
+{{- if typeIs "string" . }}
+- name: {{ . }}
+{{- else }}
+- {{ toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- end }}
