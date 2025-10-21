@@ -2,9 +2,26 @@ package config
 
 import (
 	"time"
-
-	"github.com/mainuli/artifusion/internal/proxy"
 )
+
+// CircuitBreakerConfig represents circuit breaker configuration
+type CircuitBreakerConfig struct {
+	Enabled          bool          `mapstructure:"enabled"`
+	MaxRequests      uint32        `mapstructure:"max_requests"`
+	Interval         time.Duration `mapstructure:"interval"`
+	Timeout          time.Duration `mapstructure:"timeout"`
+	FailureThreshold float64       `mapstructure:"failure_threshold"`
+}
+
+// AuthConfig contains backend authentication configuration
+type AuthConfig struct {
+	Type        string `mapstructure:"type"`
+	Username    string `mapstructure:"username"`
+	Password    string `mapstructure:"password"`
+	Token       string `mapstructure:"token"`
+	HeaderName  string `mapstructure:"header_name"`
+	HeaderValue string `mapstructure:"header_value"`
+}
 
 // Config represents the complete application configuration
 type Config struct {
@@ -110,19 +127,14 @@ type OCIBackendConfig struct {
 // Interface implementation for proxy.BackendConfig
 func (o *OCIBackendConfig) GetName() string                   { return o.Name }
 func (o *OCIBackendConfig) GetURL() string                    { return o.URL }
+func (o *OCIBackendConfig) GetAuth() *AuthConfig              { return o.Auth }
 func (o *OCIBackendConfig) GetMaxIdleConns() int              { return o.MaxIdleConns }
 func (o *OCIBackendConfig) GetMaxIdleConnsPerHost() int       { return o.MaxIdleConnsPerHost }
 func (o *OCIBackendConfig) GetIdleConnTimeout() time.Duration { return o.IdleConnTimeout }
 func (o *OCIBackendConfig) GetDialTimeout() time.Duration     { return o.DialTimeout }
 func (o *OCIBackendConfig) GetRequestTimeout() time.Duration  { return o.RequestTimeout }
-func (o *OCIBackendConfig) GetCircuitBreaker() *proxy.CircuitBreakerConfig {
-	return &proxy.CircuitBreakerConfig{
-		Enabled:          o.CircuitBreaker.Enabled,
-		MaxRequests:      o.CircuitBreaker.MaxRequests,
-		Interval:         o.CircuitBreaker.Interval,
-		Timeout:          o.CircuitBreaker.Timeout,
-		FailureThreshold: o.CircuitBreaker.FailureThreshold,
-	}
+func (o *OCIBackendConfig) GetCircuitBreaker() *CircuitBreakerConfig {
+	return &o.CircuitBreaker
 }
 
 // MavenBackendConfig contains Maven repository backend configuration
@@ -146,19 +158,14 @@ type MavenBackendConfig struct {
 // Interface implementation for proxy.BackendConfig
 func (m *MavenBackendConfig) GetName() string                   { return m.Name }
 func (m *MavenBackendConfig) GetURL() string                    { return m.URL }
+func (m *MavenBackendConfig) GetAuth() *AuthConfig              { return m.Auth }
 func (m *MavenBackendConfig) GetMaxIdleConns() int              { return m.MaxIdleConns }
 func (m *MavenBackendConfig) GetMaxIdleConnsPerHost() int       { return m.MaxIdleConnsPerHost }
 func (m *MavenBackendConfig) GetIdleConnTimeout() time.Duration { return m.IdleConnTimeout }
 func (m *MavenBackendConfig) GetDialTimeout() time.Duration     { return m.DialTimeout }
 func (m *MavenBackendConfig) GetRequestTimeout() time.Duration  { return m.RequestTimeout }
-func (m *MavenBackendConfig) GetCircuitBreaker() *proxy.CircuitBreakerConfig {
-	return &proxy.CircuitBreakerConfig{
-		Enabled:          m.CircuitBreaker.Enabled,
-		MaxRequests:      m.CircuitBreaker.MaxRequests,
-		Interval:         m.CircuitBreaker.Interval,
-		Timeout:          m.CircuitBreaker.Timeout,
-		FailureThreshold: m.CircuitBreaker.FailureThreshold,
-	}
+func (m *MavenBackendConfig) GetCircuitBreaker() *CircuitBreakerConfig {
+	return &m.CircuitBreaker
 }
 
 // NPMBackendConfig contains NPM registry backend configuration
@@ -182,43 +189,19 @@ type NPMBackendConfig struct {
 // Interface implementation for proxy.BackendConfig
 func (n *NPMBackendConfig) GetName() string                   { return n.Name }
 func (n *NPMBackendConfig) GetURL() string                    { return n.URL }
+func (n *NPMBackendConfig) GetAuth() *AuthConfig              { return n.Auth }
 func (n *NPMBackendConfig) GetMaxIdleConns() int              { return n.MaxIdleConns }
 func (n *NPMBackendConfig) GetMaxIdleConnsPerHost() int       { return n.MaxIdleConnsPerHost }
 func (n *NPMBackendConfig) GetIdleConnTimeout() time.Duration { return n.IdleConnTimeout }
 func (n *NPMBackendConfig) GetDialTimeout() time.Duration     { return n.DialTimeout }
 func (n *NPMBackendConfig) GetRequestTimeout() time.Duration  { return n.RequestTimeout }
-func (n *NPMBackendConfig) GetCircuitBreaker() *proxy.CircuitBreakerConfig {
-	return &proxy.CircuitBreakerConfig{
-		Enabled:          n.CircuitBreaker.Enabled,
-		MaxRequests:      n.CircuitBreaker.MaxRequests,
-		Interval:         n.CircuitBreaker.Interval,
-		Timeout:          n.CircuitBreaker.Timeout,
-		FailureThreshold: n.CircuitBreaker.FailureThreshold,
-	}
+func (n *NPMBackendConfig) GetCircuitBreaker() *CircuitBreakerConfig {
+	return &n.CircuitBreaker
 }
 
 // PathRewriteConfig contains path rewriting rules
 type PathRewriteConfig struct {
 	AddLibraryPrefix bool `mapstructure:"add_library_prefix"`
-}
-
-// AuthConfig contains backend authentication configuration
-type AuthConfig struct {
-	Type        string `mapstructure:"type"`
-	Username    string `mapstructure:"username"`
-	Password    string `mapstructure:"password"`
-	Token       string `mapstructure:"token"`
-	HeaderName  string `mapstructure:"header_name"`
-	HeaderValue string `mapstructure:"header_value"`
-}
-
-// CircuitBreakerConfig contains circuit breaker settings
-type CircuitBreakerConfig struct {
-	Enabled          bool          `mapstructure:"enabled"`
-	MaxRequests      uint32        `mapstructure:"max_requests"`
-	Interval         time.Duration `mapstructure:"interval"`
-	Timeout          time.Duration `mapstructure:"timeout"`
-	FailureThreshold float64       `mapstructure:"failure_threshold"`
 }
 
 // LoggingConfig contains logging configuration

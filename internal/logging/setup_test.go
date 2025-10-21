@@ -158,7 +158,12 @@ func TestIsTerminal(t *testing.T) {
 
 func TestNewConsoleLogger(t *testing.T) {
 	// Just verify it doesn't panic and returns a valid logger
-	logger := newConsoleLogger()
+	cfg := Config{
+		Level:      "info",
+		Format:     "console",
+		ForceColor: false,
+	}
+	logger := newConsoleLogger(cfg)
 	_ = logger // Logger created successfully
 }
 

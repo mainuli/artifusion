@@ -51,14 +51,18 @@ artifusion:
           name: "local-hosted"
           url: "http://artifusion-registry:5000"
 
-      # Maven - uses /maven path prefix
+      # Maven - uses /m2 path prefix (customizable)
       maven:
         enabled: true
         host: ""  # Empty = path-based routing
-        path_prefix: "/maven"
+        path_prefix: "/m2"  # Client-facing path (can be any value)
         backend:
           name: "reposilite"
-          url: "http://artifusion-reposilite:8080"
+          url: "http://artifusion-reposilite:8080/maven"  # Backend repository name (must match Reposilite config)
+          auth:
+            type: "basic"
+            username: "admin"
+            password: "admin123"
 
       # NPM - uses /npm path prefix
       npm:

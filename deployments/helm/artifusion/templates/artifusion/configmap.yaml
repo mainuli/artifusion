@@ -65,6 +65,10 @@ data:
         backend:
           name: "reposilite"
           url: "http://{{ include "artifusion.reposilite.serviceName" . }}:8080/maven"
+          {{- if .Values.artifusion.config.protocols.maven.backend.auth }}
+          auth:
+            {{- .Values.artifusion.config.protocols.maven.backend.auth | toYaml | nindent 12 }}
+          {{- end }}
 
       npm:
         enabled: {{ .Values.artifusion.config.protocols.npm.enabled }}

@@ -26,9 +26,7 @@ func (h *Handler) selectBackendAndProxy(w http.ResponseWriter, r *http.Request, 
 		Str("username", authResult.Username).
 		Msg("Routing to Maven backend")
 
-	// Inject backend auth
-	h.injectBackendAuth(r, backend)
-
+	// Note: Backend authentication is handled by proxy client
 	// Proxy with URL rewriting
 	return h.proxyWithRewriting(w, r, backend)
 }

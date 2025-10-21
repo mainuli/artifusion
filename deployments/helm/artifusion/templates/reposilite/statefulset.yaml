@@ -24,6 +24,30 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
       initContainers:
+        # Cleanup existing database to force Reposilite to use configuration.shared.json
+        # This ensures custom "maven" repository is created instead of default repos
+        - name: cleanup-database
+          image: cgr.dev/chainguard/busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              echo "WORKAROUND: Reposilite 3.5.26 creates default repos even with --shared-configuration"
+              echo "Deleting database on every start to force fresh initialization from JSON"
+
+              if [ -f /app/data/reposilite.db ]; then
+                echo "Removing existing database..."
+                rm -f /app/data/reposilite.db
+                echo "Database deleted. Reposilite will recreate from configuration.shared.json"
+              else
+                echo "No database found. Fresh initialization will occur."
+              fi
+
+              # Note: This is a workaround. Ideally Reposilite should respect --shared-configuration
+              # and create repositories defined in the JSON file instead of defaults.
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
         - name: copy-config
           image: cgr.dev/chainguard/busybox:latest
           command:
@@ -51,7 +75,7 @@ spec:
               protocol: TCP
           env:
             - name: REPOSILITE_OPTS
-              value: "--local-configuration=/app/data/configuration.cdn --shared-configuration=/app/data/configuration.shared.json"
+              value: "--local-configuration=/app/data/configuration.cdn --shared-configuration=/app/data/configuration.shared.json --token admin:admin123"
             - name: GITHUB_PACKAGES_USERNAME
               valueFrom:
                 secretKeyRef:

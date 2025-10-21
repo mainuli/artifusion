@@ -1,17 +1,17 @@
-[
-  {
+{
+  "authentication": {
     "ldap": {
       "enabled": false
     }
   },
-  {
+  "statistics": {
     "enabled": true,
     "resolvedRequestsInterval": "MONTHLY"
   },
-  {
+  "web": {
     "forwardedIp": "X-Forwarded-For"
   },
-  {
+  "maven": {
     "repositories": [
       {
         "id": "maven",
@@ -90,7 +90,7 @@
       }
     ]
   },
-  {
+  "frontend": {
     "id": "artifusion-repository",
     "title": "Artifusion Maven Repository",
     "description": "Unified Maven repository with GitHub authentication",
@@ -98,4 +98,4 @@
     "organizationLogo": "",
     "icpLicense": ""
   }
-]
+}

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mainuli/artifusion/internal/config"
 	"github.com/rs/zerolog"
 )
 
@@ -22,17 +23,7 @@ type BackendConfig interface {
 	GetIdleConnTimeout() time.Duration
 	GetDialTimeout() time.Duration
 	GetRequestTimeout() time.Duration
-	GetCircuitBreaker() *CircuitBreakerConfig
-}
-
-// CircuitBreakerConfig represents circuit breaker configuration
-// This is redeclared here to avoid circular dependencies with the config package
-type CircuitBreakerConfig struct {
-	Enabled          bool
-	MaxRequests      uint32
-	Interval         time.Duration
-	Timeout          time.Duration
-	FailureThreshold float64
+	GetCircuitBreaker() *config.CircuitBreakerConfig
 }
 
 // Client handles backend proxying with connection pooling
@@ -172,7 +163,7 @@ func (c *Client) doProxyRequest(req *Request) (*Response, error) {
 	// This prevents HTTP request smuggling and connection poisoning attacks
 	filteredHeaders := removeHopByHopHeaders(req.Headers)
 
-	// Copy safe headers (excluding Authorization - backend auth already injected)
+	// Copy safe headers (excluding Authorization - will be set separately for backend auth)
 	for key, values := range filteredHeaders {
 		if key == "Authorization" {
 			continue
@@ -180,6 +171,11 @@ func (c *Client) doProxyRequest(req *Request) (*Response, error) {
 		for _, value := range values {
 			backendReq.Header.Add(key, value)
 		}
+	}
+
+	// Inject backend authentication if configured
+	if err := c.injectBackendAuth(backendReq, req.Backend); err != nil {
+		return nil, fmt.Errorf("failed to inject backend auth: %w", err)
 	}
 
 	// Get or create HTTP client for this backend
@@ -300,6 +296,97 @@ func (c *Client) WriteResponse(w http.ResponseWriter, resp *Response, body []byt
 		Int("bytes", bytesWritten).
 		Bool("modified", true).
 		Msg("Response written with modifications")
+
+	return nil
+}
+
+// authProvider is an interface for backends that support authentication
+type authProvider interface {
+	GetAuth() *config.AuthConfig
+}
+
+// validateAuthCredentials validates authentication credentials for security
+func validateAuthCredentials(auth *config.AuthConfig) error {
+	switch strings.ToLower(auth.Type) {
+	case "basic":
+		if auth.Username == "" || auth.Password == "" {
+			return fmt.Errorf("basic auth requires both username and password")
+		}
+		if strings.ContainsAny(auth.Username, "\r\n") || strings.ContainsAny(auth.Password, "\r\n") {
+			return fmt.Errorf("username/password cannot contain newlines")
+		}
+	case "bearer":
+		if auth.Token == "" {
+			return fmt.Errorf("bearer auth requires a token")
+		}
+		if strings.ContainsAny(auth.Token, "\r\n") {
+			return fmt.Errorf("token cannot contain newlines")
+		}
+	case "header":
+		if auth.HeaderName == "" || auth.HeaderValue == "" {
+			return fmt.Errorf("header auth requires both header_name and header_value")
+		}
+		if strings.ContainsAny(auth.HeaderValue, "\r\n") {
+			return fmt.Errorf("header value cannot contain newlines")
+		}
+		// Validate header name is not a forbidden header
+		forbidden := []string{"host", "content-length", "transfer-encoding", "connection", "upgrade"}
+		for _, f := range forbidden {
+			if strings.EqualFold(auth.HeaderName, f) {
+				return fmt.Errorf("cannot set forbidden header: %s", auth.HeaderName)
+			}
+		}
+	}
+	return nil
+}
+
+// injectBackendAuth adds authentication headers to the backend request if configured
+func (c *Client) injectBackendAuth(req *http.Request, backend BackendConfig) error {
+	// Check if backend has authentication configured
+	authBackend, ok := backend.(authProvider)
+	if !ok {
+		return nil // Backend doesn't support authentication
+	}
+
+	auth := authBackend.GetAuth()
+	if auth == nil {
+		return nil // No auth configured
+	}
+
+	// Empty auth type means no authentication
+	if auth.Type == "" {
+		return nil
+	}
+
+	// Validate credentials
+	if err := validateAuthCredentials(auth); err != nil {
+		return fmt.Errorf("invalid backend auth configuration for %s: %w", backend.GetName(), err)
+	}
+
+	var injectedAuthType string
+
+	switch strings.ToLower(auth.Type) {
+	case "basic":
+		// Basic authentication with username and password
+		req.SetBasicAuth(auth.Username, auth.Password)
+		injectedAuthType = "basic"
+	case "bearer":
+		// Bearer token authentication
+		req.Header.Set("Authorization", "Bearer "+auth.Token)
+		injectedAuthType = "bearer"
+	case "header":
+		// Custom header authentication
+		req.Header.Set(auth.HeaderName, auth.HeaderValue)
+		injectedAuthType = "header"
+	default:
+		return fmt.Errorf("unsupported auth type: %s", auth.Type)
+	}
+
+	// Log once after successful injection
+	c.logger.Debug().
+		Str("backend", backend.GetName()).
+		Str("auth_type", injectedAuthType).
+		Msg("Injected backend authentication")
 
 	return nil
 }

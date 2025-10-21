@@ -573,10 +573,11 @@ Reposilite 3 separates configuration into two distinct files following best prac
 
 **2. Shared Configuration** (`configuration.shared.json`):
 - **Purpose**: Repositories, LDAP, statistics, and other features stored in database
-- **Format**: JSON array of configuration objects
+- **Format**: JSON object with top-level domain keys (`authentication`, `statistics`, `web`, `maven`, `frontend`)
 - **Scope**: Shared configuration stored in Reposilite's database
 - **Parameter**: `--shared-configuration=/app/data/configuration.shared.json`
 - **Contains**: Repository definitions with proxied upstreams, LDAP settings, statistics, web config, frontend metadata
+- **IMPORTANT**: The JSON structure must be a single object with domain keys, NOT an array. Incorrect format will cause Reposilite to fall back to creating default repositories (releases, snapshots, private) instead of custom repositories defined in the configuration.
 
 **Deployment Configuration**:
 
@@ -814,29 +815,52 @@ GITHUB_PACKAGES_TOKEN=ghp_your_personal_access_token
 
 ### Configuration File Structure
 
-The `configuration.shared.json` uses an **array of configuration objects** at root level:
+The `configuration.shared.json` uses a **single JSON object** with top-level domain keys:
 
 ```json
-[
-  { /* LDAP config */ },
-  { /* Statistics config */ },
-  { /* Web config */ },
-  {
+{
+  "authentication": {
+    "ldap": {
+      "enabled": false
+    }
+  },
+  "statistics": {
+    "enabled": true,
+    "resolvedRequestsInterval": "MONTHLY"
+  },
+  "web": {
+    "forwardedIp": "X-Forwarded-For"
+  },
+  "maven": {
     "repositories": [
       {
         "id": "maven",
+        "visibility": "PUBLIC",
+        "redeployment": true,
+        "preserveSnapshots": true,
+        "storageProvider": {
+          "type": "fs",
+          "quota": "100%",
+          "mount": ""
+        },
+        "storagePolicy": "PRIORITIZE_UPSTREAM_METADATA",
         "proxied": [
-          { "reference": "https://maven.pkg.github.com", ... },
-          { "reference": "https://repo.maven.apache.org/maven2/", ... },
-          { "reference": "https://maven.google.com/", ... },
+          { "reference": "https://repo.maven.apache.org/maven2/", "store": true, ... },
+          { "reference": "https://jaspersoft.jfrog.io/jaspersoft/third-party-ce-artifacts/", "store": true, ... },
           ...
         ]
       }
     ]
   },
-  { /* Frontend config */ }
-]
+  "frontend": {
+    "id": "artifusion-repository",
+    "title": "Artifusion Maven Repository",
+    "description": "Unified Maven repository with GitHub authentication"
+  }
+}
 ```
+
+**CRITICAL**: The root structure must be a single JSON object with domain keys (`authentication`, `statistics`, `web`, `maven`, `frontend`), NOT an array. Using an array format will cause Reposilite to ignore the configuration and fall back to creating default repositories (releases, snapshots, private).
 
 **Key Fields**:
 - `"proxied"`: Array of upstream repository configurations (order matters - cascades in order)
@@ -866,7 +890,7 @@ The `configuration.shared.json` uses an **array of configuration objects** at ro
   - Credentials injected from `secrets.github.username` and `secrets.github.token` Helm values
   - Secret created in `templates/reposilite/secret.yaml`
 
-- **Format**: JSON array (Reposilite 3 shared configuration format)
+- **Format**: JSON object with domain keys (Reposilite 3 shared configuration format)
 
 ## Troubleshooting
 

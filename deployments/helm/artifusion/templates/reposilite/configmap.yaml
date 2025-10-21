@@ -40,20 +40,20 @@ data:
     debugEnabled: false
 
   configuration.shared.json: |
-    [
-      {
+    {
+      "authentication": {
         "ldap": {
           "enabled": false
         }
       },
-      {
+      "statistics": {
         "enabled": true,
         "resolvedRequestsInterval": "MONTHLY"
       },
-      {
+      "web": {
         "forwardedIp": "X-Forwarded-For"
       },
-      {
+      "maven": {
         "repositories": [
           {
             "id": "maven",
@@ -134,7 +134,7 @@ data:
           }
         ]
       },
-      {
+      "frontend": {
         "id": "artifusion-repository",
         "title": "Artifusion Maven Repository",
         "description": "Unified Maven repository with GitHub authentication",
@@ -142,5 +142,5 @@ data:
         "organizationLogo": "",
         "icpLicense": ""
       }
-    ]
+    }
 {{- end }}
