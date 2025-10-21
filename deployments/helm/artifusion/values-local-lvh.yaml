@@ -1,0 +1,201 @@
+# Local Kubernetes deployment values for lvh.me domain
+# Path-based routing on artifacts.lvh.me
+# Small storage sizes for local development
+
+artifusion:
+  replicaCount: 1
+
+  # Use local built image or pre-built latest
+  image:
+    repository: artifusion
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  config:
+    server:
+      port: 8080
+      read_timeout: 60s
+      write_timeout: 300s
+      max_concurrent_requests: 1000
+
+    github:
+      # Leave empty to allow any GitHub user for local testing
+      # Set to your org name if you want to test org-based auth
+      required_org: ""
+      required_teams: []
+      api_url: "https://api.github.com"
+      auth_cache_ttl: 30m
+
+    protocols:
+      # OCI/Docker - uses /v2 path per OCI Distribution Spec
+      oci:
+        enabled: true
+        host: ""  # Empty = path-based routing
+        # Note: path_prefix is always /v2 for OCI (not configurable)
+        pull_backends:
+          - name: "local-hosted"
+            url: "http://artifusion-registry:5000"
+            upstream_namespace: ""
+            scope: ["*"]
+          - name: "ghcr-cache"
+            url: "http://artifusion-oci-registry:8080"
+            upstream_namespace: "ghcr.io"
+            scope: ["*"]
+          - name: "dockerhub-cache"
+            url: "http://artifusion-oci-registry:8080"
+            upstream_namespace: "docker.io"
+            scope: ["*"]
+            path_rewrite:
+              add_library_prefix: true
+        push_backend:
+          name: "local-hosted"
+          url: "http://artifusion-registry:5000"
+
+      # Maven - uses /maven path prefix
+      maven:
+        enabled: true
+        host: ""  # Empty = path-based routing
+        path_prefix: "/maven"
+        backend:
+          name: "reposilite"
+          url: "http://artifusion-reposilite:8080"
+
+      # NPM - uses /npm path prefix
+      npm:
+        enabled: true
+        host: ""  # Empty = path-based routing
+        path_prefix: "/npm"
+        backend:
+          name: "verdaccio"
+          url: "http://artifusion-verdaccio:4873"
+
+    rate_limit:
+      enabled: true
+      requests_per_sec: 1000.0
+      per_user_requests: 100.0
+
+    metrics:
+      enabled: true
+      path: "/metrics"
+
+    logging:
+      level: "debug"  # Use debug for local development
+      format: "console"  # Human-readable for local dev
+      force_color: true
+
+  # Small resource requests for local dev
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: false
+
+  podDisruptionBudget:
+    enabled: false
+
+  serviceMonitor:
+    enabled: false
+
+# OCI pull-through cache (GHCR + Docker Hub)
+ociRegistry:
+  enabled: true
+
+  storage:
+    size: 5Gi  # Moderate size for local caching
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 200m
+      memory: 512Mi
+
+# Local hosted registry for push operations
+registry:
+  enabled: true
+
+  storage:
+    size: 5Gi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Maven repository (Reposilite)
+reposilite:
+  enabled: true
+
+  storage:
+    size: 5Gi
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+# NPM registry cache (Verdaccio)
+verdaccio:
+  enabled: true
+
+  storage:
+    size: 5Gi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Ingress configuration for lvh.me
+ingress:
+  enabled: true
+  className: nginx
+
+  # Path-based routing on single domain
+  hosts:
+    - host: artifacts.lvh.me
+      paths:
+        - path: /
+          pathType: Prefix
+
+  # No TLS for local development
+  tls: []
+
+  annotations:
+    # Unlimited request body size - required for large artifact uploads
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    # Extended timeouts for large files
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    # Disable buffering for streaming
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # No SSL redirect for local dev
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # Force HTTP (no HTTPS for local)
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+
+# No network policies for local dev
+networkPolicy:
+  enabled: false
+
+# No secrets needed for local dev (public registries only)
+# If you want to test with GitHub org authentication, add:
+# secrets:
+#   github:
+#     username: "your-github-username"
+#     token: "ghp_your_github_pat"
