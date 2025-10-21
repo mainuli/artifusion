@@ -7,140 +7,140 @@ metadata:
     {{- include "artifusion.reposilite.labels" . | nindent 4 }}
 data:
   configuration.cdn: |
-    # Reposilite Configuration (No Authentication)
-    # Auto-configured by Helm chart
-    # Documentation: https://reposilite.com
+    # Reposilite 3 Local Configuration
+    # Instance infrastructure settings
+    # Documentation: https://reposilite.com/guide/general
 
-    # ===== Web UI =====
-    # Disable web interface (API-only mode)
-    frontend false
+    # Network binding
+    hostname: 0.0.0.0
+    port: 8080
 
-    # ===== Hosted Repositories =====
+    # Database configuration
+    database: sqlite reposilite.db
 
-    # Releases repository (immutable artifacts)
-    repository releases {
-      visibility public
-      redeployment false
-      preserveSnapshots false
-      storageProvider fs releases
-    }
+    # Frontend
+    # Disable default frontend dashboard (API-only mode)
+    # Artifusion handles authentication and routing
+    defaultFrontend: false
 
-    # Snapshots repository (mutable artifacts)
-    repository snapshots {
-      visibility public
-      redeployment true
-      preserveSnapshots true
-      storageProvider fs snapshots
-    }
+    # Thread pools
+    webThreadPool: 16
+    ioThreadPool: 8
+    databaseThreadPool: 1
 
-    # ===== Mirror/Proxy Repositories (Cascade Priority Order) =====
+    # Performance
+    compressionStrategy: none
+    idleTimeout: 30000
 
-    {{- if .Values.artifusion.config.github.required_org }}
-    # 1. GitHub Packages (HIGHEST PRIORITY)
-    # Requires authentication with GitHub PAT (read:packages scope)
-    repository github-packages {
-      visibility public
-      redeployment false
-      proxied {
-        link https://maven.pkg.github.com
-        store true
-        storagePolicy PRIORITIZE_UPSTREAM_METADATA
-        connectTimeout 3s
-        readTimeout 15s
-        allowedGroups *
-        allowedExtensions jar war xml pom module asc md5 sha1 sha256 sha512
-        # Authentication configured via header (GitHub uses Bearer token)
-        authentication {
-          type header
-          headerName Authorization
-          headerValue Bearer ${GITHUB_PACKAGES_TOKEN}
+    # Caching
+    bypassExternalCache: true
+    cachedLogSize: 50
+
+    # Debug
+    debugEnabled: false
+
+  configuration.shared.json: |
+    [
+      {
+        "ldap": {
+          "enabled": false
         }
+      },
+      {
+        "enabled": true,
+        "resolvedRequestsInterval": "MONTHLY"
+      },
+      {
+        "forwardedIp": "X-Forwarded-For"
+      },
+      {
+        "repositories": [
+          {
+            "id": "maven",
+            "visibility": "PUBLIC",
+            "redeployment": true,
+            "preserveSnapshots": true,
+            "storageProvider": {
+              "type": "fs",
+              "quota": "100%",
+              "mount": "",
+              "maxResourceLockLifetimeInSeconds": 60
+            },
+            "storagePolicy": "PRIORITIZE_UPSTREAM_METADATA",
+            "metadataMaxAge": 0,
+            "proxied": [
+              {{- if .Values.artifusion.config.github.required_org }}
+              {
+                "reference": "https://maven.pkg.github.com/{{ .Values.artifusion.config.github.required_org }}/*/",
+                "store": true,
+                "allowedGroups": [],
+                "allowedExtensions": [],
+                "connectTimeout": 3,
+                "readTimeout": 15,
+                "authorization": {
+                  "method": "BASIC",
+                  "login": "${GITHUB_PACKAGES_USERNAME}",
+                  "password": "${GITHUB_PACKAGES_TOKEN}"
+                },
+                "httpProxy": ""
+              },
+              {{- end }}
+              {
+                "reference": "https://repo.maven.apache.org/maven2/",
+                "store": true,
+                "allowedGroups": [],
+                "allowedExtensions": [],
+                "connectTimeout": 3,
+                "readTimeout": 15,
+                "httpProxy": ""
+              },
+              {
+                "reference": "https://jaspersoft.jfrog.io/jaspersoft/third-party-ce-artifacts/",
+                "store": true,
+                "allowedGroups": [],
+                "allowedExtensions": [],
+                "connectTimeout": 3,
+                "readTimeout": 15,
+                "httpProxy": ""
+              },
+              {
+                "reference": "https://repo.spring.io/release",
+                "store": true,
+                "allowedGroups": [],
+                "allowedExtensions": [],
+                "connectTimeout": 3,
+                "readTimeout": 15,
+                "httpProxy": ""
+              },
+              {
+                "reference": "https://oss.sonatype.org/content/repositories/snapshots/",
+                "store": true,
+                "allowedGroups": [],
+                "allowedExtensions": [],
+                "connectTimeout": 3,
+                "readTimeout": 15,
+                "httpProxy": ""
+              },
+              {
+                "reference": "https://plugins.gradle.org/m2/",
+                "store": true,
+                "allowedGroups": [],
+                "allowedExtensions": [],
+                "connectTimeout": 3,
+                "readTimeout": 15,
+                "httpProxy": ""
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "artifusion-repository",
+        "title": "Artifusion Maven Repository",
+        "description": "Unified Maven repository with GitHub authentication",
+        "organizationWebsite": "https://github.com/mainuli/artifusion",
+        "organizationLogo": "",
+        "icpLicense": ""
       }
-      storageProvider fs github-packages
-    }
-    {{- end }}
-
-    # 2. Maven Central (PRIMARY PUBLIC REPOSITORY)
-    repository maven-central {
-      visibility public
-      redeployment false
-      proxied {
-        link https://repo.maven.apache.org/maven2/
-        store true
-        storagePolicy PRIORITIZE_UPSTREAM_METADATA
-        connectTimeout 3s
-        readTimeout 15s
-        allowedGroups *
-        allowedExtensions jar war xml pom module asc md5 sha1 sha256 sha512
-      }
-      storageProvider fs maven-central
-    }
-
-    # 3. Google Maven (Android/Google libraries)
-    repository google {
-      visibility public
-      redeployment false
-      proxied {
-        link https://maven.google.com/
-        store true
-        storagePolicy PRIORITIZE_UPSTREAM_METADATA
-        connectTimeout 3s
-        readTimeout 15s
-        allowedGroups *
-        allowedExtensions jar war aar xml pom module asc md5 sha1 sha256 sha512
-      }
-      storageProvider fs google
-    }
-
-    # 4. Spring Releases (Spring Framework libraries)
-    repository spring-releases {
-      visibility public
-      redeployment false
-      proxied {
-        link https://repo.spring.io/release
-        store true
-        storagePolicy PRIORITIZE_UPSTREAM_METADATA
-        connectTimeout 3s
-        readTimeout 15s
-        allowedGroups *
-        allowedExtensions jar war xml pom module asc md5 sha1 sha256 sha512
-      }
-      storageProvider fs spring-releases
-    }
-
-    # 5. Gradle Plugins
-    repository gradle-plugins {
-      visibility public
-      redeployment false
-      proxied {
-        link https://plugins.gradle.org/m2/
-        store true
-        storagePolicy PRIORITIZE_UPSTREAM_METADATA
-        connectTimeout 3s
-        readTimeout 15s
-        allowedGroups *
-        allowedExtensions jar war xml pom module asc md5 sha1 sha256 sha512
-      }
-      storageProvider fs gradle-plugins
-    }
-
-    # 6. JCenter (OPTIONAL - deprecated but still useful for legacy projects)
-    # Note: JCenter is read-only as of May 2021
-    repository jcenter {
-      visibility public
-      redeployment false
-      proxied {
-        link https://jcenter.bintray.com/
-        store true
-        storagePolicy PRIORITIZE_UPSTREAM_METADATA
-        connectTimeout 3s
-        readTimeout 15s
-        allowedGroups *
-        allowedExtensions jar war xml pom module asc md5 sha1 sha256 sha512
-      }
-      storageProvider fs jcenter
-    }
-
-    # ===== Access Tokens =====
-    # No tokens configured - authentication handled by Artifusion
+    ]
 {{- end }}

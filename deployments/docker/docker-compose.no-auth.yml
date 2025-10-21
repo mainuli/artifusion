@@ -83,21 +83,30 @@ services:
 
   # ===== Maven Repository (Reposilite) =====
   # NO AUTHENTICATION: Runs on private network, protected by Artifusion only
-  # Note: Reposilite config may still define tokens, but they won't be enforced
   reposilite:
     image: dzikoysk/reposilite:latest
     container_name: reposilite
     ports:
       - "8081:8080"  # Expose for direct access (optional, for debugging)
     volumes:
-      - ./config/reposilite-no-auth.cdn:/app/configuration
+      - ./config/configuration.cdn:/tmp/configuration.cdn:ro
+      - ./config/configuration.shared.json:/tmp/configuration.shared.json:ro
       - reposilite-data:/app/data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cp /tmp/configuration.cdn /app/data/configuration.cdn
+        cp /tmp/configuration.shared.json /app/data/configuration.shared.json
+        echo "Configuration files copied to /app/data"
+        exec java $$JAVA_OPTS -jar reposilite.jar $$REPOSILITE_OPTS
     environment:
-      # Server configuration
-      REPOSILITE_HOSTNAME: 0.0.0.0
-      REPOSILITE_PORT: 8080
+      # Reposilite 3 configuration files
+      # Local config: instance infrastructure (hostname, port, frontend, etc.)
+      # Shared config: repositories, LDAP, statistics, etc.
+      REPOSILITE_OPTS: "--local-configuration=/app/data/configuration.cdn --shared-configuration=/app/data/configuration.shared.json"
 
-      # GitHub Packages token for proxying GitHub Packages Maven artifacts
+      # GitHub Packages credentials for proxying GitHub Packages Maven artifacts
+      GITHUB_PACKAGES_USERNAME: ${GITHUB_PACKAGES_USERNAME}
       GITHUB_PACKAGES_TOKEN: ${GITHUB_PACKAGES_TOKEN}
 
       # Java options (optional - adjust heap size if needed)
@@ -106,7 +115,7 @@ services:
       - artifusion
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/maven/details/releases"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/maven/details/maven"]
       interval: 30s
       timeout: 5s
       retries: 3

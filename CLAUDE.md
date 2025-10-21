@@ -126,7 +126,7 @@ Client Request
     ↓
 [Upstream Backends]
   - OCI: GHCR, Docker Hub, Quay, local registry (cascading)
-  - Maven: Reposilite (mirrors Maven Central, GitHub Packages, etc.)
+  - Maven: Reposilite 3 (unified repository with mirrored upstreams: GitHub Packages, Maven Central, JasperReports, Spring, Sonatype Snapshots, Gradle)
   - NPM: Verdaccio (caches npmjs.org)
 ```
 
@@ -539,6 +539,295 @@ proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 - **Horizontal scaling** - Load balance across instances
 - **Shared-nothing** - No inter-instance coordination needed
 - **Cache is local** - Each instance has own auth cache (reduces GitHub API calls by ~99%)
+
+## Maven Repository Architecture (Reposilite 3)
+
+### Unified Repository Approach
+
+Artifusion uses Reposilite 3 as its Maven backend, configured with a **single unified repository** endpoint that handles both deployments and dependency resolution.
+
+**Configuration Method**: Reposilite 3 uses two separate configuration files for different purposes
+
+### Configuration Architecture
+
+Reposilite 3 separates configuration into two distinct files following best practices:
+
+**1. Local Configuration** (`configuration.cdn`):
+- **Purpose**: Instance infrastructure settings (hostname, port, database, frontend, performance)
+- **Format**: CDN format (key-value pairs)
+- **Scope**: Local to the Reposilite instance, not stored in database
+- **Parameter**: `--local-configuration=/app/data/configuration.cdn`
+- **Key Settings**:
+  - `hostname: 0.0.0.0` - Network binding
+  - `port: 8080` - HTTP port
+  - `database: sqlite reposilite.db` - Database configuration
+  - `defaultFrontend: false` - **Disable web UI** (Artifusion handles all routing/auth)
+  - `webThreadPool: 16` - Web server thread pool size
+  - `ioThreadPool: 8` - I/O operations thread pool
+  - `databaseThreadPool: 1` - Database connection pool
+  - `compressionStrategy: none` - Response compression (handled by Artifusion)
+  - `idleTimeout: 30000` - Connection idle timeout (ms)
+  - `bypassExternalCache: true` - Bypass HTTP cache headers
+  - `cachedLogSize: 50` - Log cache size
+  - `debugEnabled: false` - Debug mode
+
+**2. Shared Configuration** (`configuration.shared.json`):
+- **Purpose**: Repositories, LDAP, statistics, and other features stored in database
+- **Format**: JSON array of configuration objects
+- **Scope**: Shared configuration stored in Reposilite's database
+- **Parameter**: `--shared-configuration=/app/data/configuration.shared.json`
+- **Contains**: Repository definitions with proxied upstreams, LDAP settings, statistics, web config, frontend metadata
+
+**Deployment Configuration**:
+
+**Docker**:
+```yaml
+volumes:
+  - ./config/configuration.cdn:/app/configuration.cdn:ro
+  - ./config/configuration.shared.json:/app/data/configuration.shared.json:ro
+  - reposilite-data:/app/data
+environment:
+  REPOSILITE_OPTS: "--local-configuration=/app/configuration.cdn --shared-configuration=/app/data/configuration.shared.json"
+```
+
+**Kubernetes** (StatefulSet init container):
+```yaml
+initContainers:
+  - name: copy-config
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /app/data
+        cp /config/configuration.cdn /app/data/configuration.cdn
+        cp /config/configuration.shared.json /app/data/configuration.shared.json
+env:
+  - name: REPOSILITE_OPTS
+    value: "--local-configuration=/app/data/configuration.cdn --shared-configuration=/app/data/configuration.shared.json"
+```
+
+**Why Separate Configurations?**
+- **Infrastructure vs Features**: Local config handles instance-level settings (ports, threads), shared config handles repository logic
+- **Persistence**: Shared config is stored in database and can be managed via API, local config is file-only
+- **Portability**: Shared config can be exported/imported across Reposilite instances
+- **Frontend Disable**: The `defaultFrontend: false` setting in local config disables Reposilite's web UI, as Artifusion handles all authentication and routing
+
+### Repository Structure
+
+**Single Unified Repository: `maven`**
+- **ID**: `maven`
+- **Visibility**: PUBLIC
+- **Redeployment**: Enabled (allows snapshot redeployments)
+- **Preserve Snapshots**: Enabled (keeps all snapshot versions)
+- **Storage**: Local filesystem (`/app/data/maven`)
+- **Storage Policy**: PRIORITIZE_UPSTREAM_METADATA (always fetch latest from upstreams)
+- **Proxied Upstreams**: Array of upstream repositories (searched in order)
+
+**Proxied Upstream Configurations** (in `"proxied"` array):
+1. **GitHub Packages** (if GitHub org configured)
+   - Reference: `https://maven.pkg.github.com/{ORG}/*/` (requires org in path)
+   - Authentication: BASIC auth with GitHub credentials
+     - Method: `BASIC`
+     - Login: `${GITHUB_PACKAGES_USERNAME}` (from secret/environment)
+     - Password: `${GITHUB_PACKAGES_TOKEN}` (from secret/environment)
+   - Store: true (caches artifacts locally)
+   - Use case: Private organizational artifacts
+   - Kubernetes: Credentials from `secrets.github.username` and `secrets.github.token` Helm values
+   - Docker: Set via `GITHUB_PACKAGES_USERNAME` and `GITHUB_PACKAGES_TOKEN` environment variables
+
+2. **Maven Central**
+   - Reference: `https://repo.maven.apache.org/maven2/`
+   - Store: true (caches artifacts locally)
+   - Use case: Primary public Maven repository
+
+3. **JasperReports JFrog**
+   - Reference: `https://jaspersoft.jfrog.io/jaspersoft/third-party-ce-artifacts/`
+   - Store: true (caches artifacts locally)
+   - Use case: JasperReports and third-party CE artifacts
+
+4. **Spring Releases**
+   - Reference: `https://repo.spring.io/release`
+   - Store: true (caches artifacts locally)
+   - Use case: Spring Framework libraries
+
+5. **Sonatype OSS Snapshots**
+   - Reference: `https://oss.sonatype.org/content/repositories/snapshots/`
+   - Store: true (caches artifacts locally)
+   - Use case: Open source snapshot artifacts
+
+6. **Gradle Plugins**
+   - Reference: `https://plugins.gradle.org/m2/`
+   - Store: true (caches artifacts locally)
+   - Use case: Gradle plugin dependencies
+
+### Dependency Resolution Flow
+
+When a Maven client requests an artifact (`/maven/com/example/app/1.0.0/app-1.0.0.jar`):
+
+1. **Local Storage Check**: Reposilite checks the `maven` repository's local filesystem storage
+2. **Proxied Upstream Cascade**: If not found locally, Reposilite iterates through the `"proxied"` array in order:
+   - Tries GitHub Packages (if configured and authenticated)
+   - Tries Maven Central
+   - Tries JasperReports JFrog
+   - Tries Spring Releases
+   - Tries Sonatype OSS Snapshots
+   - Tries Gradle Plugins
+   - Stops at first successful response
+3. **Local Caching**: On successful upstream fetch, artifact is stored locally (`"store": true`)
+4. **Response**: Artifact is served to the client
+5. **Subsequent Requests**: Cached artifacts served directly from local storage (unless storage policy forces upstream check for metadata)
+
+### Client Configuration
+
+**Single Repository URL**: Clients configure one endpoint for both deployments and dependencies
+
+```xml
+<!-- pom.xml -->
+<project>
+  <!-- Deployment configuration -->
+  <distributionManagement>
+    <repository>
+      <id>artifusion</id>
+      <url>https://repo.example.com/maven</url>
+    </repository>
+    <snapshotRepository>
+      <id>artifusion-snapshots</id>
+      <url>https://repo.example.com/maven</url>
+    </snapshotRepository>
+  </distributionManagement>
+
+  <!-- Dependency resolution -->
+  <repositories>
+    <repository>
+      <id>artifusion</id>
+      <url>https://repo.example.com/maven</url>
+      <snapshots>
+        <enabled>true</enabled>
+      </snapshots>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+    </repository>
+  </repositories>
+</project>
+```
+
+**Gradle configuration**:
+```gradle
+repositories {
+    maven {
+        url = uri("https://repo.example.com/maven")
+        credentials {
+            username = System.getenv("GITHUB_USERNAME")
+            password = System.getenv("GITHUB_TOKEN")
+        }
+    }
+}
+
+publishing {
+    repositories {
+        maven {
+            url = uri("https://repo.example.com/maven")
+            credentials {
+                username = System.getenv("GITHUB_USERNAME")
+                password = System.getenv("GITHUB_TOKEN")
+            }
+        }
+    }
+}
+```
+
+### Deployment Configuration
+
+**Docker Compose** (`deployments/docker/docker-compose.yml`):
+```yaml
+reposilite:
+  image: dzikoysk/reposilite:latest
+  volumes:
+    - ./config/configuration.shared.json:/app/data/configuration.shared.json:ro
+    - reposilite-data:/app/data
+  environment:
+    REPOSILITE_OPTS: "--shared-configuration=/app/data/configuration.shared.json"
+    GITHUB_PACKAGES_USERNAME: ${GITHUB_PACKAGES_USERNAME}
+    GITHUB_PACKAGES_TOKEN: ${GITHUB_PACKAGES_TOKEN}
+```
+
+Set these in your `.env` file or environment:
+```bash
+GITHUB_PACKAGES_USERNAME=your-github-username
+GITHUB_PACKAGES_TOKEN=ghp_your_personal_access_token
+```
+
+**Kubernetes/Helm** (`deployments/helm/artifusion`):
+- ConfigMap: `templates/reposilite/configmap.yaml` contains `configuration.shared.json`
+- StatefulSet: `templates/reposilite/statefulset.yaml` mounts config and passes `--shared-configuration`
+- Init container copies JSON to persistent volume
+- Environment variable `REPOSILITE_OPTS` passes parameter to Reposilite
+
+### Benefits of Unified Approach
+
+1. **Simplified Client Configuration**: Single URL for all Maven operations
+2. **Transparent Caching**: All proxied artifacts cached locally with `"store": true`
+3. **Automatic Fallback**: Cascading through multiple upstreams for resilience
+4. **Centralized Management**: One repository with array of proxied upstreams
+5. **Snapshot Support**: Both releases and snapshots supported in single endpoint
+6. **Storage Policy**: `PRIORITIZE_UPSTREAM_METADATA` ensures latest versions from upstreams
+
+### Configuration File Structure
+
+The `configuration.shared.json` uses an **array of configuration objects** at root level:
+
+```json
+[
+  { /* LDAP config */ },
+  { /* Statistics config */ },
+  { /* Web config */ },
+  {
+    "repositories": [
+      {
+        "id": "maven",
+        "proxied": [
+          { "reference": "https://maven.pkg.github.com", ... },
+          { "reference": "https://repo.maven.apache.org/maven2/", ... },
+          { "reference": "https://maven.google.com/", ... },
+          ...
+        ]
+      }
+    ]
+  },
+  { /* Frontend config */ }
+]
+```
+
+**Key Fields**:
+- `"proxied"`: Array of upstream repository configurations (order matters - cascades in order)
+- `"reference"`: Upstream repository URL
+- `"store"`: Boolean - cache artifacts locally
+- `"allowedGroups"`: Empty array `[]` means allow all groups
+- `"allowedExtensions"`: Empty array `[]` means allow all file extensions (permissive)
+  - Alternative: Specify extensions with dot prefix (e.g., `[".jar", ".pom", ".xml"]`)
+- `"connectTimeout"`: Connection timeout in seconds
+- `"readTimeout"`: Read timeout in seconds
+- `"authorization"`: Optional authentication for private upstreams
+  - `"method"`: `"BASIC"` or `"HEADER"`
+  - For BASIC: `"login"` and `"password"` fields
+  - For HEADER: `"credentials"` object with `"headerName"` and `"headerValue"`
+
+### Configuration File Locations
+
+- **Docker**: `deployments/docker/config/configuration.shared.json`
+  - **Important**: Replace `YOUR_ORG` placeholder in GitHub Packages reference URL
+    - Example: `"https://maven.pkg.github.com/YOUR_ORG/*/"` → `"https://maven.pkg.github.com/mycompany/*/"`
+  - Set environment variables in `.env` or shell:
+    - `GITHUB_PACKAGES_USERNAME` - Your GitHub username
+    - `GITHUB_PACKAGES_TOKEN` - GitHub PAT with `read:packages` scope
+
+- **Kubernetes**: `deployments/helm/artifusion/templates/reposilite/configmap.yaml`
+  - GitHub org automatically templated from `artifusion.config.github.required_org` Helm value
+  - Credentials injected from `secrets.github.username` and `secrets.github.token` Helm values
+  - Secret created in `templates/reposilite/secret.yaml`
+
+- **Format**: JSON array (Reposilite 3 shared configuration format)
 
 ## Troubleshooting
 

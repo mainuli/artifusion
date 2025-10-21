@@ -167,42 +167,64 @@ protocols:
     # REQUIRED when host is empty (path-based routing)
     # Optional when host is set (can be "" for root path)
     # Backend sees requests without this prefix
-    # Example with prefix: /maven/releases/com/example/app/1.0/app-1.0.jar
-    #   -> backend receives: /releases/com/example/app/1.0/app-1.0.jar
+    # Example with prefix: /maven/com/example/app/1.0/app-1.0.jar
+    #   -> backend receives: /maven/com/example/app/1.0/app-1.0.jar
     path_prefix: /maven
 
     client_auth:
       supported_schemes: [basic, bearer]
       realm: "Artifusion Maven Repository"
 
-    # Backend: Reposilite Maven Repository Manager
-    # Reposilite handles multiple repositories internally:
+    # Backend: Reposilite 3 Maven Repository Manager
     #
-    # HOSTED REPOSITORIES (for deploying artifacts):
-    #   - /releases       - Stable releases (immutable, e.g., 1.0.0)
-    #   - /snapshots      - Development snapshots (mutable, e.g., 1.0.0-SNAPSHOT)
+    # UNIFIED REPOSITORY APPROACH (Reposilite 3.x):
+    # Reposilite is configured with a single "maven" repository that:
+    #   - Accepts artifact deployments (releases and snapshots)
+    #   - Proxies/mirrors multiple upstream Maven repositories
+    #   - Caches all proxied artifacts locally
     #
-    # MIRROR REPOSITORIES (cascade priority order for pulls):
-    #   1. /github-packages  - GitHub Packages (requires GitHub PAT)
-    #   2. /maven-central    - Maven Central Repository
-    #   3. /google           - Google Maven (Android/Google libraries)
-    #   4. /spring-releases  - Spring Framework libraries
-    #   5. /gradle-plugins   - Gradle plugins
-    #   6. /jcenter          - JCenter (legacy, optional)
+    # Configuration structure (configuration.shared.json):
+    #   - Main repository: "maven"
+    #     - Hosts local deployments
+    #     - Has "proxied" array with multiple upstream configurations
     #
-    # Reposilite caches all proxied artifacts for faster subsequent access.
+    #   - Upstream proxied repositories (in order):
+    #     - github-packages: https://maven.pkg.github.com/YOUR_ORG/*/ (requires org in path)
+    #     - maven-central: https://repo.maven.apache.org/maven2/
+    #     - jaspersoft-jfrog: https://jaspersoft.jfrog.io/jaspersoft/third-party-ce-artifacts/
+    #     - spring-releases: https://repo.spring.io/release
+    #     - sonatype-snapshots: https://oss.sonatype.org/content/repositories/snapshots/
+    #     - gradle-plugins: https://plugins.gradle.org/m2/
     #
-    # Maven client configuration (note the /m2 prefix):
+    # IMPORTANT: GitHub Packages requires organization/user in the URL path:
+    #   - Kubernetes: Automatically templated from github.required_org
+    #   - Docker: Manually replace YOUR_ORG in configuration.shared.json
+    #
+    # When resolving dependencies, Reposilite:
+    #   1. Checks local "maven" repository storage
+    #   2. If not found, cascades through mirrored repositories
+    #   3. Caches successful resolutions locally
+    #
+    # Maven client configuration (single repository URL):
     #   <distributionManagement>
     #     <repository>
-    #       <id>artifusion-releases</id>
-    #       <url>http://localhost:8080/m2/releases</url>
+    #       <id>artifusion</id>
+    #       <url>http://localhost:8080/maven</url>
     #     </repository>
     #     <snapshotRepository>
     #       <id>artifusion-snapshots</id>
-    #       <url>http://localhost:8080/m2/snapshots</url>
+    #       <url>http://localhost:8080/maven</url>
     #     </snapshotRepository>
     #   </distributionManagement>
+    #
+    #   <repositories>
+    #     <repository>
+    #       <id>artifusion</id>
+    #       <url>http://localhost:8080/maven</url>
+    #       <snapshots><enabled>true</enabled></snapshots>
+    #       <releases><enabled>true</enabled></releases>
+    #     </repository>
+    #   </repositories>
     #
     # Backend: Reposilite Maven Repository Manager
     # No authentication required - backend is on private network

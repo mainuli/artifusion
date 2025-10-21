@@ -32,7 +32,9 @@ spec:
             - |
               mkdir -p /app/data
               cp /config/configuration.cdn /app/data/configuration.cdn
-              echo "Configuration copied to /app/data/configuration.cdn"
+              cp /config/configuration.shared.json /app/data/configuration.shared.json
+              echo "Local configuration copied to /app/data/configuration.cdn"
+              echo "Shared configuration copied to /app/data/configuration.shared.json"
           volumeMounts:
             - name: config
               mountPath: /config
@@ -48,6 +50,14 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
+            - name: REPOSILITE_OPTS
+              value: "--local-configuration=/app/data/configuration.cdn --shared-configuration=/app/data/configuration.shared.json"
+            - name: GITHUB_PACKAGES_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifusion.reposilite.serviceName" . }}-secret
+                  key: github-username
+                  optional: true
             - name: GITHUB_PACKAGES_TOKEN
               valueFrom:
                 secretKeyRef:
