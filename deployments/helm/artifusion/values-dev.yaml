@@ -8,6 +8,7 @@ artifusion:
     logging:
       level: "debug"
       format: "console"
+      force_color: true
 
   resources:
     requests:

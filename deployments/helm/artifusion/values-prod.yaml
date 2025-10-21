@@ -18,6 +18,7 @@ artifusion:
     logging:
       level: "info"
       format: "json"
+      force_color: false
 
   resources:
     requests:

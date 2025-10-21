@@ -291,6 +291,7 @@ Viper is configured with prefix `ARTIFUSION` and automatic environment variable 
 - `CONFIG_PATH` - Path to config.yaml (no prefix, default: looks in /etc/artifusion, ~/.artifusion, ./config, .)
 - `ARTIFUSION_LOGGING_LEVEL` - Initial log level before config loads (debug, info, warn, error)
 - `ARTIFUSION_LOGGING_FORMAT` - Initial log format before config loads (console, json)
+- `ARTIFUSION_LOGGING_FORCE_COLOR` - Force colored output even when TTY is not detected (true, false)
 
 **Config overrides** (via Viper's AutomaticEnv):
 Any config field can be overridden with pattern: `ARTIFUSION_<SECTION>_<KEY>` where:
@@ -401,6 +402,8 @@ All protocol handlers rewrite backend responses to use public-facing URLs:
 
 - Uses `github.com/rs/zerolog` for structured logging
 - **Console format** (default): Human-readable with auto TTY detection
+  - Colors automatically enabled/disabled based on TTY detection
+  - Use `force_color: true` to force colors in Docker/Kubernetes environments
 - **JSON format**: For log aggregation systems (ELK, Splunk, etc.)
 - Always include `requestID` field for request correlation
 - Log levels: DEBUG (internal details) → INFO (normal ops) → WARN (degraded) → ERROR (failures)

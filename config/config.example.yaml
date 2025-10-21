@@ -266,6 +266,12 @@ logging:
   # Override with: ARTIFUSION_LOGGING_FORMAT
   format: console
 
+  # Force colored output even when TTY is not detected
+  # Useful for environments like Docker/Kubernetes where TTY auto-detection may fail
+  # Only applies when format is "console"
+  # Override with: ARTIFUSION_LOGGING_FORCE_COLOR
+  force_color: false
+
   # Debug options
   include_headers: false  # Include HTTP headers in logs
   include_body: false     # Include request/response bodies (WARNING: may log sensitive data)

@@ -139,6 +139,7 @@ artifusion:
     logging:
       level: "info"
       format: "json"
+      force_color: false
 
   ## Artifusion resource requests and limits
   ## @param artifusion.resources.requests Resource requests for Artifusion container
