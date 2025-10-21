@@ -59,10 +59,16 @@ func (d *NPMDetector) Detect(r *http.Request) bool {
 	// Check 1: Path prefix matching (if configured)
 	if d.pathPrefix != "" {
 		if !strings.HasPrefix(path, d.pathPrefix+"/") && path != d.pathPrefix {
-			// Path doesn't match prefix, skip remaining checks
+			// Path doesn't match prefix
 			return false
 		}
+		// Path matches prefix - route to this protocol handler
+		// The handler will validate the specific request and handle auth
+		return true
 	}
+
+	// No pathPrefix configured - use protocol-specific detection
+	// This handles host-only routing mode
 
 	// Check 2: NPM-specific endpoints
 	for _, endpoint := range npmEndpoints {

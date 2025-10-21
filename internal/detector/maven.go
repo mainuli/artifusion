@@ -45,12 +45,18 @@ func (d *MavenDetector) Detect(r *http.Request) bool {
 	// Check 1: Path prefix matching (if configured)
 	if d.pathPrefix != "" {
 		if !strings.HasPrefix(path, d.pathPrefix+"/") && path != d.pathPrefix {
-			// Path doesn't match prefix, skip remaining checks
+			// Path doesn't match prefix
 			return false
 		}
+		// Path matches prefix - route to this protocol handler
+		// The handler will validate the specific request and handle auth
+		return true
 	}
 
-	// Check 1: Maven file extensions
+	// No pathPrefix configured - use protocol-specific detection
+	// This handles host-only routing mode
+
+	// Check 2: Maven file extensions
 	mavenExtensions := []string{
 		".pom",    // Maven POM files
 		".jar",    // JAR files
