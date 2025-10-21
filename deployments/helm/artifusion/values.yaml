@@ -113,7 +113,7 @@ artifusion:
         path_prefix: "/maven"
         backend:
           name: "reposilite"
-          url: "http://RELEASE_NAME-reposilite:8080"  # Will be replaced in template
+          url: "http://RELEASE_NAME-reposilite:8080/maven"  # Will be replaced in template (includes repository name)
 
       ## NPM registry protocol
       npm:

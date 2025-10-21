@@ -166,9 +166,11 @@ protocols:
     # Path prefix for Maven requests
     # REQUIRED when host is empty (path-based routing)
     # Optional when host is set (can be "" for root path)
-    # Backend sees requests without this prefix
-    # Example with prefix: /maven/com/example/app/1.0/app-1.0.jar
-    #   -> backend receives: /maven/com/example/app/1.0/app-1.0.jar
+    # Artifusion strips this prefix before forwarding to backend
+    # Example: Client requests /maven/com/example/app/1.0/app-1.0.jar
+    #   -> Prefix stripped: /com/example/app/1.0/app-1.0.jar
+    #   -> Forwarded to: http://reposilite:8080/maven/com/example/app/1.0/app-1.0.jar
+    # (Note: Backend URL includes repository name to reconstruct full path)
     path_prefix: /maven
 
     client_auth:
@@ -228,9 +230,10 @@ protocols:
     #
     # Backend: Reposilite Maven Repository Manager
     # No authentication required - backend is on private network
+    # URL must include the repository name (/maven) since path_prefix is stripped
     backend:
       name: reposilite
-      url: http://reposilite:8080
+      url: http://reposilite:8080/maven
       max_idle_conns: 200
       max_idle_conns_per_host: 100
       idle_conn_timeout: 90s

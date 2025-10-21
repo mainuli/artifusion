@@ -64,7 +64,7 @@ data:
         path_prefix: {{ .Values.artifusion.config.protocols.maven.path_prefix | quote }}
         backend:
           name: "reposilite"
-          url: "http://{{ include "artifusion.reposilite.serviceName" . }}:8080"
+          url: "http://{{ include "artifusion.reposilite.serviceName" . }}:8080/maven"
 
       npm:
         enabled: {{ .Values.artifusion.config.protocols.npm.enabled }}

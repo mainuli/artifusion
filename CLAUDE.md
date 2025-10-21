@@ -660,6 +660,45 @@ env:
    - Store: true (caches artifacts locally)
    - Use case: Gradle plugin dependencies
 
+### Artifusion → Reposilite Routing
+
+**How Artifusion Routes Maven Requests:**
+
+Artifusion's Maven handler strips the configured `path_prefix` before forwarding to Reposilite. To ensure Reposilite receives the correct repository path, the backend URL **must include the repository name**.
+
+**Example Request Flow:**
+```
+1. Maven Client → Artifusion
+   GET https://repo.example.com/maven/com/example/app/1.0.0/app-1.0.0.jar
+
+2. Artifusion Maven Handler
+   - Strips path_prefix (/maven)
+   - Remaining path: /com/example/app/1.0.0/app-1.0.0.jar
+
+3. Artifusion → Reposilite Backend
+   - Backend URL: http://reposilite:8080/maven  ← includes repository name!
+   - Path: /com/example/app/1.0.0/app-1.0.0.jar
+   - Final URL: http://reposilite:8080/maven/com/example/app/1.0.0/app-1.0.0.jar
+
+4. Reposilite
+   - Resolves from "maven" repository
+   - Checks local storage then cascades through proxied upstreams
+```
+
+**Configuration:**
+```yaml
+# artifusion config.yaml
+maven:
+  path_prefix: /maven         # Stripped by Artifusion before forwarding
+  backend:
+    url: http://reposilite:8080/maven  # Must include repository name!
+```
+
+**Why this works:**
+- Artifusion strips `/maven` prefix → path becomes `/com/example/app/...`
+- Appends to backend URL: `http://reposilite:8080/maven` + `/com/example/app/...`
+- Reposilite receives: `/maven/com/example/app/...` which routes to the "maven" repository
+
 ### Dependency Resolution Flow
 
 When a Maven client requests an artifact (`/maven/com/example/app/1.0.0/app-1.0.0.jar`):
