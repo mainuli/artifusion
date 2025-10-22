@@ -201,7 +201,7 @@ ci: lint test build
 # Helm configuration
 HELM_VERSION ?= $(VERSION)
 HELM_CHART_DIR = deployments/helm/artifusion
-HELM_REGISTRY = oci://ghcr.io/mainuli
+HELM_REGISTRY = oci://ghcr.io/mainuli/charts
 HELM_CHART_NAME = artifusion
 GITHUB_USER ?= mainuli
 

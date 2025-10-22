@@ -1,1 +1,149 @@
-docker-compose.no-auth.yml
+services:
+
+  # ===== Artifusion Reverse Proxy =====
+  artifusion:
+    image: artifusion:latest
+    container_name: artifusion
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config/artifusion.yaml:/etc/artifusion/config.yaml:ro
+    environment:
+      ARTIFUSION_GITHUB_REQUIRED_ORG: ${GITHUB_ORG:-}
+      ARTIFUSION_GITHUB_REQUIRED_TEAMS: ${GITHUB_TEAMS:-}
+      ARTIFUSION_GITHUB_AUTH_CACHE_TTL: ${AUTH_CACHE_TTL:-30m}
+      REPOSILITE_ADMIN_TOKEN: ${REPOSILITE_ADMIN_TOKEN:-}
+      ARTIFUSION_LOGGING_LEVEL: ${LOG_LEVEL:-info}
+      ARTIFUSION_LOGGING_FORMAT: ${LOG_FORMAT:-console}
+    depends_on:
+      registry:
+        condition: service_healthy
+      oci-registry:
+        condition: service_started
+      reposilite:
+        condition: service_healthy
+      verdaccio:
+        condition: service_healthy
+    networks:
+      - artifusion
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ===== OCI Pull-Through Cache =====
+  oci-registry:
+    image: mcronce/oci-registry:latest
+    container_name: oci-registry
+    command:
+      - --listen
+      - 0.0.0.0:8080
+      - --upstream-config-file
+      - /etc/oci-registry/upstream-config.yaml
+      - filesystem
+      - --root
+      - /var/lib/oci-cache
+    volumes:
+      - ./config/oci-registry-upstream.yaml:/etc/oci-registry/upstream-config.yaml:ro
+      - oci-cache:/var/lib/oci-cache
+    environment:
+      UPSTREAM_CREDENTIALS: ${UPSTREAM_CREDENTIALS:-}
+    depends_on:
+      - registry
+    networks:
+      - artifusion
+    restart: unless-stopped
+
+  # ===== Docker Registry =====
+  # NO AUTHENTICATION - Private network only
+  registry:
+    image: registry:2
+    container_name: docker-registry
+    volumes:
+      - registry-data:/var/lib/registry
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR: inmemory
+    networks:
+      - artifusion
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:5000/v2/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ===== Maven Repository (Reposilite 3) =====
+  # WITH AUTHENTICATION - Token-based auth enabled
+  reposilite:
+    image: dzikoysk/reposilite:latest
+    container_name: reposilite
+    volumes:
+      - ./config/configuration.cdn:/tmp/configuration.cdn:ro
+      - ./config/configuration.shared.json:/tmp/configuration.shared.json:ro
+      - reposilite-data:/app/data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        cp /tmp/configuration.cdn /app/data/configuration.cdn
+        cp /tmp/configuration.shared.json /app/data/configuration.shared.json
+        if [ -n "$REPOSILITE_ADMIN_TOKEN" ]; then
+          exec java $JAVA_OPTS -jar reposilite.jar $REPOSILITE_OPTS --token admin:$REPOSILITE_ADMIN_TOKEN
+        else
+          echo "WARNING: REPOSILITE_ADMIN_TOKEN not set. Backend authentication disabled."
+          exec java $JAVA_OPTS -jar reposilite.jar $REPOSILITE_OPTS
+        fi
+    environment:
+      REPOSILITE_OPTS: "--local-configuration=/app/data/configuration.cdn --shared-configuration=/app/data/configuration.shared.json"
+      GITHUB_PACKAGES_USERNAME: ${GITHUB_PACKAGES_USERNAME:-}
+      GITHUB_PACKAGES_TOKEN: ${GITHUB_PACKAGES_TOKEN:-}
+      REPOSILITE_ADMIN_TOKEN: ${REPOSILITE_ADMIN_TOKEN:-}
+      JAVA_OPTS: "-Xms256m -Xmx512m"
+    networks:
+      - artifusion
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8080/api/maven/details/maven || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ===== NPM Registry (Verdaccio) =====
+  # NO AUTHENTICATION - Private network only
+  verdaccio:
+    image: verdaccio/verdaccio:6
+    container_name: verdaccio
+    volumes:
+      - ./config/verdaccio-no-auth.yaml:/verdaccio/conf/config.yaml:ro
+      - verdaccio-storage:/verdaccio/storage
+    environment:
+      VERDACCIO_PORT: 4873
+      VERDACCIO_PROTOCOL: http
+      NPM_TOKEN: ${GITHUB_PACKAGES_TOKEN:-}
+      NODE_ENV: production
+      VERDACCIO_LOG_LEVEL: ${VERDACCIO_LOG_LEVEL:-info}
+    networks:
+      - artifusion
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:4873/-/ping || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  oci-cache:
+  registry-data:
+  reposilite-data:
+  verdaccio-storage:
+
+networks:
+  artifusion:
+    name: artifusion
+    driver: bridge
