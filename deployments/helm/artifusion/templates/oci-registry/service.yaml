@@ -1,0 +1,18 @@
+{{- if .Values.ociRegistry.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "artifusion.ociRegistry.serviceName" . }}
+  labels:
+    {{- include "artifusion.ociRegistry.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.ociRegistry.service.type }}
+  clusterIP: None  # Headless service for StatefulSet
+  ports:
+    - port: {{ .Values.ociRegistry.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "artifusion.ociRegistry.selectorLabels" . | nindent 4 }}
+{{- end }}

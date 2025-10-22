@@ -1,0 +1,74 @@
+# Minimal values for CI testing
+
+artifusion:
+  replicaCount: 1
+
+  image:
+    pullPolicy: IfNotPresent
+
+  config:
+    logging:
+      level: "debug"
+      format: "console"
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+ociRegistry:
+  storage:
+    size: 100Mi
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 100m
+      memory: 256Mi
+
+registry:
+  storage:
+    size: 100Mi
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+reposilite:
+  storage:
+    size: 100Mi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 200m
+      memory: 512Mi
+
+verdaccio:
+  storage:
+    size: 100Mi
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+ingress:
+  enabled: false
+
+networkPolicy:
+  enabled: false

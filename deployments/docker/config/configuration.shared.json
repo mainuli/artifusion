@@ -1,0 +1,101 @@
+{
+  "authentication": {
+    "ldap": {
+      "enabled": false
+    }
+  },
+  "statistics": {
+    "enabled": true,
+    "resolvedRequestsInterval": "MONTHLY"
+  },
+  "web": {
+    "forwardedIp": "X-Forwarded-For"
+  },
+  "maven": {
+    "repositories": [
+      {
+        "id": "maven",
+        "visibility": "PUBLIC",
+        "redeployment": true,
+        "preserveSnapshots": true,
+        "storageProvider": {
+          "type": "fs",
+          "quota": "100%",
+          "mount": "",
+          "maxResourceLockLifetimeInSeconds": 60
+        },
+        "storagePolicy": "PRIORITIZE_UPSTREAM_METADATA",
+        "metadataMaxAge": 0,
+        "proxied": [
+          {
+            "reference": "https://maven.pkg.github.com/YOUR_ORG/*/",
+            "store": true,
+            "allowedGroups": [],
+            "allowedExtensions": [],
+            "connectTimeout": 3,
+            "readTimeout": 15,
+            "authorization": {
+              "method": "BASIC",
+              "login": "${GITHUB_PACKAGES_USERNAME}",
+              "password": "${GITHUB_PACKAGES_TOKEN}"
+            },
+            "httpProxy": ""
+          },
+          {
+            "reference": "https://repo.maven.apache.org/maven2/",
+            "store": true,
+            "allowedGroups": [],
+            "allowedExtensions": [],
+            "connectTimeout": 3,
+            "readTimeout": 15,
+            "httpProxy": ""
+          },
+          {
+            "reference": "https://jaspersoft.jfrog.io/jaspersoft/third-party-ce-artifacts/",
+            "store": true,
+            "allowedGroups": [],
+            "allowedExtensions": [],
+            "connectTimeout": 3,
+            "readTimeout": 15,
+            "httpProxy": ""
+          },
+          {
+            "reference": "https://repo.spring.io/release",
+            "store": true,
+            "allowedGroups": [],
+            "allowedExtensions": [],
+            "connectTimeout": 3,
+            "readTimeout": 15,
+            "httpProxy": ""
+          },
+          {
+            "reference": "https://oss.sonatype.org/content/repositories/snapshots/",
+            "store": true,
+            "allowedGroups": [],
+            "allowedExtensions": [],
+            "connectTimeout": 3,
+            "readTimeout": 15,
+            "httpProxy": ""
+          },
+          {
+            "reference": "https://plugins.gradle.org/m2/",
+            "store": true,
+            "allowedGroups": [],
+            "allowedExtensions": [],
+            "connectTimeout": 3,
+            "readTimeout": 15,
+            "httpProxy": ""
+          }
+        ]
+      }
+    ]
+  },
+  "frontend": {
+    "id": "artifusion-repository",
+    "title": "Artifusion Maven Repository",
+    "description": "Unified Maven repository with GitHub authentication",
+    "organizationWebsite": "https://github.com/mainuli/artifusion",
+    "organizationLogo": "",
+    "icpLicense": ""
+  }
+}

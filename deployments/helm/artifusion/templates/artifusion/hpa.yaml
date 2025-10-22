@@ -1,0 +1,32 @@
+{{- if and .Values.artifusion.enabled .Values.artifusion.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "artifusion.artifusion.serviceName" . }}
+  labels:
+    {{- include "artifusion.artifusion.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "artifusion.artifusion.serviceName" . }}
+  minReplicas: {{ .Values.artifusion.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.artifusion.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.artifusion.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.artifusion.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.artifusion.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.artifusion.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}

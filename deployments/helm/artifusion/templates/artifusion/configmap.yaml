@@ -1,0 +1,101 @@
+{{- if .Values.artifusion.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "artifusion.artifusion.serviceName" . }}
+  labels:
+    {{- include "artifusion.artifusion.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    server:
+      port: {{ .Values.artifusion.config.server.port }}
+      read_timeout: {{ .Values.artifusion.config.server.read_timeout }}
+      write_timeout: {{ .Values.artifusion.config.server.write_timeout }}
+      max_concurrent_requests: {{ .Values.artifusion.config.server.max_concurrent_requests }}
+
+    github:
+      {{- if .Values.artifusion.config.github.required_org }}
+      required_org: {{ .Values.artifusion.config.github.required_org | quote }}
+      {{- else }}
+      required_org: ""
+      {{- end }}
+      required_teams: {{ .Values.artifusion.config.github.required_teams | toJson }}
+      api_url: {{ .Values.artifusion.config.github.api_url | quote }}
+      auth_cache_ttl: {{ .Values.artifusion.config.github.auth_cache_ttl }}
+
+    protocols:
+      oci:
+        enabled: {{ .Values.artifusion.config.protocols.oci.enabled }}
+        {{- if .Values.artifusion.config.protocols.oci.host }}
+        host: {{ .Values.artifusion.config.protocols.oci.host | quote }}
+        {{- else }}
+        host: ""
+        {{- end }}
+        pull_backends:
+          - name: "local-hosted"
+            url: "http://{{ include "artifusion.registry.serviceName" . }}:5000"
+            upstream_namespace: ""
+            scope: ["*"]
+          - name: "ghcr-cache"
+            url: "http://{{ include "artifusion.ociRegistry.serviceName" . }}:8080"
+            upstream_namespace: "ghcr.io"
+            {{- if .Values.artifusion.config.github.required_org }}
+            scope: []
+            {{- else }}
+            scope: ["*"]
+            {{- end }}
+          - name: "dockerhub-cache"
+            url: "http://{{ include "artifusion.ociRegistry.serviceName" . }}:8080"
+            upstream_namespace: "docker.io"
+            scope: ["*"]
+            path_rewrite:
+              add_library_prefix: true
+        push_backend:
+          name: "local-hosted"
+          url: "http://{{ include "artifusion.registry.serviceName" . }}:5000"
+
+      maven:
+        enabled: {{ .Values.artifusion.config.protocols.maven.enabled }}
+        {{- if .Values.artifusion.config.protocols.maven.host }}
+        host: {{ .Values.artifusion.config.protocols.maven.host | quote }}
+        {{- else }}
+        host: ""
+        {{- end }}
+        path_prefix: {{ .Values.artifusion.config.protocols.maven.path_prefix | quote }}
+        backend:
+          name: "reposilite"
+          url: "http://{{ include "artifusion.reposilite.serviceName" . }}:8080/maven"
+          {{- if .Values.reposilite.enabled }}
+          # Backend auth credentials injected from environment variables
+          auth:
+            type: "basic"
+            username: "admin"
+            password: "${REPOSILITE_ADMIN_TOKEN}"
+          {{- end }}
+
+      npm:
+        enabled: {{ .Values.artifusion.config.protocols.npm.enabled }}
+        {{- if .Values.artifusion.config.protocols.npm.host }}
+        host: {{ .Values.artifusion.config.protocols.npm.host | quote }}
+        {{- else }}
+        host: ""
+        {{- end }}
+        path_prefix: {{ .Values.artifusion.config.protocols.npm.path_prefix | quote }}
+        backend:
+          name: "verdaccio"
+          url: "http://{{ include "artifusion.verdaccio.serviceName" . }}:4873"
+
+    rate_limit:
+      enabled: {{ .Values.artifusion.config.rate_limit.enabled }}
+      requests_per_sec: {{ .Values.artifusion.config.rate_limit.requests_per_sec }}
+      per_user_requests: {{ .Values.artifusion.config.rate_limit.per_user_requests }}
+
+    metrics:
+      enabled: {{ .Values.artifusion.config.metrics.enabled }}
+      path: {{ .Values.artifusion.config.metrics.path | quote }}
+
+    logging:
+      level: {{ .Values.artifusion.config.logging.level | quote }}
+      format: {{ .Values.artifusion.config.logging.format | quote }}
+      force_color: {{ .Values.artifusion.config.logging.force_color }}
+{{- end }}

@@ -1,0 +1,84 @@
+{{- if .Values.verdaccio.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "artifusion.verdaccio.serviceName" . }}
+  labels:
+    {{- include "artifusion.verdaccio.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "artifusion.verdaccio.serviceName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "artifusion.verdaccio.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/verdaccio/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "artifusion.verdaccio.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- include "artifusion.imagePullSecrets" . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.verdaccio.podSecurityContext | nindent 8 }}
+      containers:
+        - name: verdaccio
+          securityContext:
+            {{- toYaml .Values.verdaccio.securityContext | nindent 12 }}
+          image: {{ include "artifusion.verdaccio.image" . }}
+          imagePullPolicy: {{ .Values.verdaccio.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 4873
+              protocol: TCP
+          env:
+            - name: NPM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifusion.verdaccio.serviceName" . }}-secret
+                  key: npm-token
+                  optional: true
+          livenessProbe:
+            httpGet:
+              path: /-/ping
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /-/ping
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.verdaccio.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /verdaccio/conf
+              readOnly: true
+            - name: data
+              mountPath: /verdaccio/storage
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "artifusion.verdaccio.serviceName" . }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        annotations:
+          helm.sh/resource-policy: keep
+      spec:
+        accessModes: [ {{ .Values.verdaccio.storage.accessMode | quote }} ]
+        {{- if .Values.verdaccio.storage.storageClass }}
+        storageClassName: {{ .Values.verdaccio.storage.storageClass | quote }}
+        {{- else if .Values.global.storageClass }}
+        storageClassName: {{ .Values.global.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.verdaccio.storage.size }}
+{{- end }}

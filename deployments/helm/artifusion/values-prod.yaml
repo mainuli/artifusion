@@ -1,0 +1,168 @@
+# Production environment values
+# Large storage, TLS enabled, high availability
+
+artifusion:
+  replicaCount: 3
+
+  config:
+    server:
+      max_concurrent_requests: 20000
+
+    github:
+      required_org: "myorg"  # CHANGE THIS
+
+    rate_limit:
+      requests_per_sec: 2000.0
+      per_user_requests: 200.0
+
+    logging:
+      level: "info"
+      format: "json"
+      force_color: false
+
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 75
+
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+
+ociRegistry:
+  storage:
+    size: 500Gi
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+registry:
+  storage:
+    size: 500Gi
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+reposilite:
+  storage:
+    size: 200Gi
+
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+verdaccio:
+  storage:
+    size: 200Gi
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    fsGroup: 65533
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+ingress:
+  enabled: true
+  className: nginx
+
+  hosts:
+    - host: docker.example.com  # CHANGE THIS
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: maven.example.com  # CHANGE THIS
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: npm.example.com  # CHANGE THIS
+      paths:
+        - path: /
+          pathType: Prefix
+
+  tls:
+    - secretName: artifusion-tls
+      hosts:
+        - docker.example.com  # CHANGE THIS
+        - maven.example.com   # CHANGE THIS
+        - npm.example.com     # CHANGE THIS
+
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+networkPolicy:
+  enabled: true

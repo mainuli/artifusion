@@ -1,0 +1,112 @@
+{{- if .Values.reposilite.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "artifusion.reposilite.serviceName" . }}
+  labels:
+    {{- include "artifusion.reposilite.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "artifusion.reposilite.serviceName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "artifusion.reposilite.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/reposilite/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "artifusion.reposilite.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- include "artifusion.imagePullSecrets" . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.reposilite.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: copy-config
+          image: cgr.dev/chainguard/busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /app/data
+              cp /config/configuration.cdn /app/data/configuration.cdn
+              cp /config/configuration.shared.json /app/data/configuration.shared.json
+              echo "Local configuration copied to /app/data/configuration.cdn"
+              echo "Shared configuration copied to /app/data/configuration.shared.json"
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: data
+              mountPath: /app/data
+      containers:
+        - name: reposilite
+          securityContext:
+            {{- toYaml .Values.reposilite.securityContext | nindent 12 }}
+          image: {{ include "artifusion.reposilite.image" . }}
+          imagePullPolicy: {{ .Values.reposilite.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: REPOSILITE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifusion.reposilite.serviceName" . }}-admin
+                  key: admin-token
+            - name: REPOSILITE_OPTS
+              value: "--local-configuration=/app/data/configuration.cdn --shared-configuration=/app/data/configuration.shared.json --token admin:$(REPOSILITE_ADMIN_TOKEN)"
+            - name: GITHUB_PACKAGES_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifusion.reposilite.serviceName" . }}-secret
+                  key: github-username
+                  optional: true
+            - name: GITHUB_PACKAGES_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifusion.reposilite.serviceName" . }}-secret
+                  key: github-token
+                  optional: true
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.reposilite.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "artifusion.reposilite.serviceName" . }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        annotations:
+          helm.sh/resource-policy: keep
+      spec:
+        accessModes: [ {{ .Values.reposilite.storage.accessMode | quote }} ]
+        {{- if .Values.reposilite.storage.storageClass }}
+        storageClassName: {{ .Values.reposilite.storage.storageClass | quote }}
+        {{- else if .Values.global.storageClass }}
+        storageClassName: {{ .Values.global.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.reposilite.storage.size }}
+{{- end }}

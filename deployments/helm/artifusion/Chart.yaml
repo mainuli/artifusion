@@ -1,0 +1,24 @@
+apiVersion: v2
+name: artifusion
+version: 1.0.0
+appVersion: "1.0.0"
+description: Multi-protocol artifact reverse proxy with GitHub authentication
+type: application
+keywords:
+  - oci
+  - docker
+  - maven
+  - npm
+  - registry
+  - proxy
+  - reverse-proxy
+  - artifact-management
+home: https://github.com/mainuli/artifusion
+icon: https://raw.githubusercontent.com/mainuli/artifusion/main/docs/artifusion-icon.svg
+sources:
+  - https://github.com/mainuli/artifusion
+maintainers:
+  - name: mainuli
+annotations:
+  category: Infrastructure
+  licenses: Apache-2.0

@@ -1,0 +1,91 @@
+{{- if .Values.artifusion.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "artifusion.artifusion.serviceName" . }}
+  labels:
+    {{- include "artifusion.artifusion.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.artifusion.autoscaling.enabled }}
+  replicas: {{ .Values.artifusion.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "artifusion.artifusion.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/artifusion/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "artifusion.artifusion.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- include "artifusion.imagePullSecrets" . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.artifusion.podSecurityContext | nindent 8 }}
+      {{- if or .Values.registry.enabled .Values.ociRegistry.enabled .Values.reposilite.enabled .Values.verdaccio.enabled }}
+      initContainers:
+        {{- if .Values.registry.enabled }}
+        - name: wait-for-registry
+          image: cgr.dev/chainguard/wait-for-it:latest
+          args: ['{{ include "artifusion.registry.serviceName" . }}:5000', '-t', '60']
+        {{- end }}
+        {{- if .Values.ociRegistry.enabled }}
+        - name: wait-for-oci-registry
+          image: cgr.dev/chainguard/wait-for-it:latest
+          args: ['{{ include "artifusion.ociRegistry.serviceName" . }}:8080', '-t', '60']
+        {{- end }}
+        {{- if .Values.reposilite.enabled }}
+        - name: wait-for-reposilite
+          image: cgr.dev/chainguard/wait-for-it:latest
+          args: ['{{ include "artifusion.reposilite.serviceName" . }}:8080', '-t', '60']
+        {{- end }}
+        {{- if .Values.verdaccio.enabled }}
+        - name: wait-for-verdaccio
+          image: cgr.dev/chainguard/wait-for-it:latest
+          args: ['{{ include "artifusion.verdaccio.serviceName" . }}:4873', '-t', '60']
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: artifusion
+          securityContext:
+            {{- toYaml .Values.artifusion.securityContext | nindent 12 }}
+          image: {{ include "artifusion.image" . }}
+          imagePullPolicy: {{ .Values.artifusion.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.artifusion.config.server.port }}
+              protocol: TCP
+          env:
+            - name: CONFIG_PATH
+              value: /etc/artifusion/config.yaml
+            {{- if .Values.reposilite.enabled }}
+            # Reposilite backend authentication
+            - name: REPOSILITE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifusion.reposilite.serviceName" . }}-admin
+                  key: admin-token
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.artifusion.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.artifusion.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.artifusion.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/artifusion
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "artifusion.artifusion.serviceName" . }}
+        - name: tmp
+          emptyDir: {}
+{{- end }}

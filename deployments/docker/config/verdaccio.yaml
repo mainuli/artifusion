@@ -1,0 +1,147 @@
+# Verdaccio NPM Registry Configuration
+# Documentation: https://verdaccio.org/docs/configuration
+
+# ===== Storage =====
+storage: /verdaccio/storage
+
+# ===== Authentication =====
+# No authentication required - runs on private network, protected by Artifusion
+# Verdaccio will accept all requests and defer to Artifusion for authentication
+auth:
+  htpasswd:
+    file: /verdaccio/storage/htpasswd
+    # Allow all users (authentication handled by Artifusion)
+    max_users: -1
+    # Allow anonymous access since Artifusion handles auth
+    algorithm: bcrypt
+    rounds: 10
+
+# ===== Uplinks (Mirror Configuration) =====
+# Configure upstream registries for proxying packages
+uplinks:
+  # GitHub Packages NPM registry
+  github:
+    url: https://npm.pkg.github.com/
+    timeout: 30s
+    max_age: 30m
+    fail_timeout: 5m
+    maxage: 30m
+    # GitHub PAT will be passed via environment variable or Artifusion
+    headers:
+      Accept: "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*"
+    # Retry configuration
+    agent_options:
+      keepAlive: true
+      maxSockets: 40
+      maxFreeSockets: 10
+
+  # Official npmjs.org registry (main public registry)
+  npmjs:
+    url: https://registry.npmjs.org/
+    timeout: 30s
+    max_age: 2h
+    fail_timeout: 10m
+    maxage: 2h
+    # Optimize for npmjs
+    headers:
+      Accept: "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*"
+    agent_options:
+      keepAlive: true
+      maxSockets: 100
+      maxFreeSockets: 10
+
+# ===== Packages Configuration =====
+# Define package access rules and upstream routing
+packages:
+  # Scoped packages from GitHub (e.g., @myorg/package)
+  # Pattern: Match all scoped packages
+  '@*/*':
+    # Allow all operations (Artifusion controls actual access)
+    access: $all
+    publish: $all
+    unpublish: $all
+    # Proxy order: Try hosted first, then GitHub, then npmjs as fallback
+    proxy: github npmjs
+
+  # Private/hosted packages (published to this registry)
+  # Pattern: Match specific private package patterns
+  'private-*':
+    access: $all
+    publish: $all
+    unpublish: $all
+    # Don't proxy - these are hosted only
+
+  # All other packages (public packages)
+  # Pattern: Matches everything else
+  '**':
+    access: $all
+    publish: $all
+    unpublish: $all
+    # Proxy order: Try npmjs first for public packages
+    proxy: npmjs github
+
+# ===== Server Configuration =====
+server:
+  # Keep alive timeout
+  keepAliveTimeout: 60
+
+# ===== Web UI Configuration =====
+web:
+  # Disable web UI in production (access through Artifusion only)
+  enable: true
+  title: Artifusion NPM Registry
+  gravatar: false
+  # Scope for package search
+  scope: ''
+
+# ===== Middleware Configuration =====
+middlewares:
+  audit:
+    enabled: true
+
+# ===== Logs Configuration =====
+logs:
+  type: stdout
+  format: pretty
+  level: info
+
+# ===== Security Configuration =====
+security:
+  api:
+    # JWT configuration for internal use
+    jwt:
+      sign:
+        expiresIn: 7d
+      verify:
+        someProp: [value]
+
+# ===== Notifications Configuration =====
+# Disable notifications (optional - can be enabled for webhooks)
+notify:
+  method: POST
+  headers: [{'Content-Type': 'application/json'}]
+  endpoint: http://artifusion:8080/npm-webhook
+  content: '{"name": "{{name}}", "version": "{{version}}", "tag": "{{tag}}"}'
+
+# ===== Listen Configuration =====
+# Bind to all interfaces (runs in Docker container)
+listen:
+  - 0.0.0.0:4873
+
+# ===== HTTP Proxy Configuration =====
+# Configure HTTP(S) proxy if needed for upstream connections
+# http_proxy: http://proxy.company.com:8080
+# https_proxy: https://proxy.company.com:8080
+# no_proxy: localhost,127.0.0.1
+
+# ===== Max Body Size =====
+# Maximum size of uploaded package
+max_body_size: 100mb
+
+# ===== Experiments =====
+# Enable experimental features (use with caution in production)
+experiments:
+  # Enable search feature
+  search: true
+  # Enable token-based authentication
+  token: false
