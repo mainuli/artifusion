@@ -116,7 +116,24 @@ verdaccio:
       drop: ["ALL"]
 
 ingress:
-  enabled: false  # Use port-forward for local dev
+  enabled: true
+  className: nginx
+  hosts:
+    - host: lvh.me
+      paths:
+        - path: /v2
+          pathType: Prefix
+        - path: /maven
+          pathType: Prefix
+        - path: /npm
+          pathType: Prefix
+  tls: []
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
 
 networkPolicy:
   enabled: false

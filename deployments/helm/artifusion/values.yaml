@@ -86,7 +86,7 @@ artifusion:
       ## OCI/Docker Registry protocol
       oci:
         enabled: true
-        host: ""  # Optional: Set for host-based routing (e.g., "docker.example.com"). OCI always uses /v2 path per OCI Distribution Spec.
+        host: ""  # Empty = path-based routing (always uses /v2 per OCI Distribution Spec)
         pull_backends:
           - name: "local-hosted"
             url: "http://RELEASE_NAME-registry:5000"  # Will be replaced in template
@@ -119,8 +119,8 @@ artifusion:
       ## Maven repository protocol
       maven:
         enabled: true
-        host: ""
-        path_prefix: "/maven"
+        host: ""  # Empty = path-based routing
+        path_prefix: "/maven"  # Required when host is empty
         backend:
           name: "reposilite"
           url: "http://RELEASE_NAME-reposilite:8080/maven"  # Will be replaced in template (includes repository name)
@@ -142,8 +142,8 @@ artifusion:
       ## NPM registry protocol
       npm:
         enabled: true
-        host: ""
-        path_prefix: "/npm"
+        host: ""  # Empty = path-based routing
+        path_prefix: "/npm"  # Required when host is empty
         backend:
           name: "verdaccio"
           url: "http://RELEASE_NAME-verdaccio:4873"  # Will be replaced in template
@@ -534,40 +534,39 @@ ingress:
   className: nginx
 
   ## @param ingress.hosts Ingress hosts configuration
-  ## For host-based routing, use different domains per protocol
-  ## For path-based routing, use single domain with different paths
+  ## Path-based routing using lvh.me (resolves to 127.0.0.1)
   hosts:
-    - host: docker.example.com
+    - host: lvh.me
       paths:
-        - path: /
+        - path: /v2
           pathType: Prefix
-    - host: maven.example.com
-      paths:
-        - path: /
+        - path: /maven
           pathType: Prefix
-    - host: npm.example.com
-      paths:
-        - path: /
+        - path: /npm
           pathType: Prefix
 
-  ## Alternative path-based routing example:
+  ## Alternative host-based routing example:
   ## hosts:
-  ##   - host: artifacts.example.com
+  ##   - host: docker.example.com
   ##     paths:
-  ##       - path: /oci
+  ##       - path: /
   ##         pathType: Prefix
-  ##       - path: /maven
+  ##   - host: maven.example.com
+  ##     paths:
+  ##       - path: /
   ##         pathType: Prefix
-  ##       - path: /npm
+  ##   - host: npm.example.com
+  ##     paths:
+  ##       - path: /
   ##         pathType: Prefix
 
   ## @param ingress.tls Ingress TLS configuration
-  tls:
-    - secretName: artifusion-tls
-      hosts:
-        - docker.example.com
-        - maven.example.com
-        - npm.example.com
+  tls: []
+  # Uncomment for production TLS:
+  # tls:
+  #   - secretName: artifusion-tls
+  #     hosts:
+  #       - lvh.me
 
   ## @param ingress.annotations Ingress annotations
   ## Default annotations are optimized for artifact proxy use case (large files, long transfers)
@@ -594,9 +593,10 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
     # Disable buffering - enables streaming for large files
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
-    # Force HTTPS redirect for security
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    # Uncomment to enable cert-manager automatic TLS certificate provisioning:
+    # No SSL redirect for local development with lvh.me
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # Uncomment for production with cert-manager:
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
     # cert-manager.io/cluster-issuer: "letsencrypt-prod"
 
 ## @section Network Policy parameters
