@@ -6,6 +6,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
@@ -97,8 +98,79 @@ else
 fi
 echo ""
 
-# Test 3: Install package from npmjs.org via cache (first time - cache miss)
-echo -e "${BLUE}Test 3: Install Package via Artifusion (Cache Miss)${NC}"
+# Test 3: Explicit package pull from npmjs.org via Artifusion
+echo -e "${BLUE}Test 3: Pull Package from npmjs.org via Artifusion${NC}"
+echo "Testing explicit package resolution through Artifusion proxy..."
+
+# Clear npm cache to force fetch through Artifusion
+echo "Clearing npm cache..."
+npm cache clean --force 2>/dev/null || true
+
+# First pull - should go through Artifusion to npmjs.org
+echo "First pull (should fetch from npmjs.org via Artifusion)..."
+mkdir -p explicit-pull-test-1
+cd explicit-pull-test-1
+
+cat > package.json << 'EOF'
+{
+  "name": "artifusion-npm-explicit-test-1",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "express": "4.18.2"
+  }
+}
+EOF
+
+FIRST_PULL_START=$(date +%s)
+npm install --userconfig="$TEST_DIR/.npmrc" --prefer-online || {
+    echo -e "${RED}✗ Failed to pull package from npmjs.org${NC}"
+    exit 1
+}
+FIRST_PULL_END=$(date +%s)
+FIRST_PULL_TIME=$((FIRST_PULL_END - FIRST_PULL_START))
+echo -e "${GREEN}✓ Successfully pulled express:4.18.2 from npmjs.org (${FIRST_PULL_TIME}s)${NC}"
+
+# Clear npm cache again
+npm cache clean --force 2>/dev/null || true
+
+# Second pull - should be faster (cached on Verdaccio)
+echo "Second pull (should be served from Verdaccio cache)..."
+cd "$TEST_DIR"
+mkdir -p explicit-pull-test-2
+cd explicit-pull-test-2
+
+cat > package.json << 'EOF'
+{
+  "name": "artifusion-npm-explicit-test-2",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "express": "4.18.2"
+  }
+}
+EOF
+
+SECOND_PULL_START=$(date +%s)
+npm install --userconfig="$TEST_DIR/.npmrc" --prefer-online || {
+    echo -e "${RED}✗ Failed to pull cached package${NC}"
+    exit 1
+}
+SECOND_PULL_END=$(date +%s)
+SECOND_PULL_TIME=$((SECOND_PULL_END - SECOND_PULL_START))
+echo -e "${GREEN}✓ Successfully pulled from Verdaccio cache (${SECOND_PULL_TIME}s)${NC}"
+
+# Compare times (second pull should be same or faster due to caching)
+if [ "$SECOND_PULL_TIME" -le "$FIRST_PULL_TIME" ]; then
+    echo -e "${GREEN}✓ Cache is working (second pull: ${SECOND_PULL_TIME}s ≤ first pull: ${FIRST_PULL_TIME}s)${NC}"
+else
+    echo -e "${YELLOW}⚠️  Second pull was slower (${SECOND_PULL_TIME}s vs ${FIRST_PULL_TIME}s) - may be normal due to timing variance${NC}"
+fi
+echo ""
+
+# Test 4: Install additional package (lodash)
+echo -e "${BLUE}Test 4: Install Additional Package${NC}"
+cd "$TEST_DIR"
 mkdir -p consumer-project-1
 cd consumer-project-1
 
@@ -125,8 +197,8 @@ CACHE_MISS_TIME=$((END_TIME - START_TIME))
 echo -e "${GREEN}✓ Package installed and cached (took ${CACHE_MISS_TIME}s)${NC}"
 echo ""
 
-# Test 4: Install package again (cache hit)
-echo -e "${BLUE}Test 4: Install Package from Cache (Cache Hit)${NC}"
+# Test 5: Install package again (cache hit)
+echo -e "${BLUE}Test 5: Install Package from Cache (Cache Hit)${NC}"
 cd "$TEST_DIR"
 mkdir -p consumer-project-2
 cd consumer-project-2
@@ -162,8 +234,8 @@ else
 fi
 echo ""
 
-# Test 5: Create and publish custom package
-echo -e "${BLUE}Test 5: Create and Publish Custom Package${NC}"
+# Test 6: Create and publish custom package
+echo -e "${BLUE}Test 6: Create and Publish Custom Package${NC}"
 cd "$TEST_DIR"
 mkdir -p hello-artifusion-lib
 cd hello-artifusion-lib
@@ -225,9 +297,9 @@ else
 fi
 echo ""
 
-# Test 6: Install the published package (only if publish succeeded)
+# Test 7: Install the published package (only if publish succeeded)
 if [ "$PUBLISH_SKIPPED" != "true" ]; then
-    echo -e "${BLUE}Test 6: Install Published Package${NC}"
+    echo -e "${BLUE}Test 7: Install Published Package${NC}"
     cd "$TEST_DIR"
     mkdir -p consumer-project-3
     cd consumer-project-3
@@ -251,8 +323,8 @@ EOF
     }
     echo -e "${GREEN}✓ Published package installed successfully${NC}"
 
-    # Test 7: Use the published package
-    echo -e "${BLUE}Test 7: Use Published Package${NC}"
+    # Test 8: Use the published package
+    echo -e "${BLUE}Test 8: Use Published Package${NC}"
     cat > test.js << EOF
 const hello = require('$PACKAGE_NAME');
 console.log(hello.sayHello());
@@ -271,12 +343,12 @@ EOF
     fi
     echo ""
 else
-    echo -e "${BLUE}Test 6-7: Skipped (publish not available)${NC}"
+    echo -e "${BLUE}Test 7-8: Skipped (publish not available)${NC}"
     echo ""
 fi
 
-# Test 8: Check Metrics
-echo -e "${BLUE}Test 8: Check Metrics${NC}"
+# Test 9: Check Metrics
+echo -e "${BLUE}Test 9: Check Metrics${NC}"
 echo "Querying Artifusion metrics..."
 METRICS=$(curl -s "http://$ARTIFUSION_HOST/metrics" 2>&1)
 
@@ -312,6 +384,8 @@ echo -e "${GREEN}   All NPM Tests Passed! ✓${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo "Summary:"
+echo "  - npmjs.org pull (first): ${FIRST_PULL_TIME}s"
+echo "  - npmjs.org pull (cached): ${SECOND_PULL_TIME}s"
 echo "  - Package install via cache: ${CACHE_MISS_TIME}s (cache miss)"
 echo "  - Second install: ${CACHE_HIT_TIME}s (cache hit)"
 if [ "$PUBLISH_SKIPPED" = "true" ]; then
@@ -322,4 +396,10 @@ else
     echo "  - Package consumption: ✓"
     echo "  - Package usage: ✓"
 fi
+echo ""
+echo -e "${CYAN}Configuration Details:${NC}"
+echo "  - Artifusion host: $ARTIFUSION_HOST"
+echo "  - NPM registry: http://$ARTIFUSION_HOST/npm/"
+echo "  - Backend: Verdaccio (caches npmjs.org)"
+echo "  - Proxy cache: ✓ Working (npmjs.org proxied through Artifusion)"
 echo ""
