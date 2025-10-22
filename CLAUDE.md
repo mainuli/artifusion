@@ -892,6 +892,232 @@ The `configuration.shared.json` uses a **single JSON object** with top-level dom
 
 - **Format**: JSON object with domain keys (Reposilite 3 shared configuration format)
 
+## Backend Authentication
+
+Artifusion supports authenticating to backend services (Reposilite, Verdaccio, Registry) when they require credentials. This is **separate from client authentication** where users authenticate to Artifusion with GitHub PATs.
+
+### Authentication Flow
+
+```
+Client → [GitHub PAT] → Artifusion → [Backend Auth] → Backend Service
+```
+
+- **Client → Artifusion**: GitHub PAT authentication (client_auth)
+- **Artifusion → Backend**: Backend authentication (backend.auth) - documented here
+
+### Supported Authentication Types
+
+Artifusion supports three authentication methods for backend services:
+
+#### 1. Basic Authentication
+Username and password authentication (HTTP Basic Auth).
+
+**Use case**: Reposilite, Verdaccio with basic auth enabled
+
+**Configuration**:
+```yaml
+# Helm values.yaml
+artifusion:
+  config:
+    protocols:
+      maven:
+        backend:
+          name: reposilite
+          url: http://reposilite:8080/maven
+          auth:
+            type: basic
+            username: admin
+            password: admin123
+```
+
+```yaml
+# config.yaml
+protocols:
+  maven:
+    backend:
+      name: reposilite
+      url: http://reposilite:8080/maven
+      auth:
+        type: basic
+        username: admin
+        password: admin123
+```
+
+#### 2. Bearer Token Authentication
+Token-based authentication (Authorization: Bearer header).
+
+**Use case**: APIs requiring bearer tokens
+
+**Configuration**:
+```yaml
+backend:
+  auth:
+    type: bearer
+    token: your-bearer-token-here
+```
+
+#### 3. Custom Header Authentication
+Custom HTTP header authentication.
+
+**Use case**: APIs with custom authentication headers (e.g., X-API-Key)
+
+**Configuration**:
+```yaml
+backend:
+  auth:
+    type: header
+    header_name: X-API-Key
+    header_value: your-api-key-here
+```
+
+### When to Use Backend Authentication
+
+**Use backend auth when**:
+- Backend service requires authentication (e.g., Reposilite with `--token` configured)
+- Backend is exposed outside the cluster and needs protection
+- Compliance requires authenticated backend connections
+
+**Skip backend auth when**:
+- Backend service is on private network with no authentication
+- Backend trusts all requests from Artifusion pods (default setup)
+- Using NetworkPolicy for pod-level access control
+
+### Configuration Examples
+
+#### Maven Backend (Reposilite)
+
+**Local/Development** (no auth):
+```yaml
+maven:
+  backend:
+    name: reposilite
+    url: http://reposilite:8080/maven
+    # No auth - backend on private network
+```
+
+**Production** (with auth):
+```yaml
+maven:
+  backend:
+    name: reposilite
+    url: http://reposilite:8080/maven
+    auth:
+      type: basic
+      username: admin
+      password: ${REPOSILITE_PASSWORD}  # From secret
+```
+
+#### NPM Backend (Verdaccio)
+
+```yaml
+npm:
+  backend:
+    name: verdaccio
+    url: http://verdaccio:4873
+    auth:
+      type: basic
+      username: npm-user
+      password: npm-password
+```
+
+#### OCI/Docker Registry Backends
+
+OCI protocol supports authentication for both pull backends (cascading) and push backend.
+
+**Pull backend with auth**:
+```yaml
+oci:
+  pull_backends:
+    - name: local-hosted
+      url: http://registry:5000
+      upstream_namespace: ""
+      scope: ["*"]
+      auth:
+        type: basic
+        username: registry-user
+        password: registry-password
+```
+
+**Push backend with auth**:
+```yaml
+oci:
+  push_backend:
+    name: local-hosted
+    url: http://registry:5000
+    auth:
+      type: basic
+      username: registry-user
+      password: registry-password
+```
+
+**Use case**: Private Docker registries requiring authentication (e.g., Harbor, GitLab Container Registry, self-hosted Docker Registry with htpasswd).
+
+### Kubernetes Secrets Integration
+
+For production deployments, store credentials in Kubernetes secrets:
+
+**Create secret**:
+```bash
+kubectl create secret generic backend-credentials \
+  --from-literal=reposilite-username=admin \
+  --from-literal=reposilite-password=secure-password
+```
+
+**Reference in Helm values**:
+```yaml
+# Use valueFrom to inject from secrets (requires custom templating)
+# Or pass as Helm values:
+helm install artifusion ./artifusion \
+  --set artifusion.config.protocols.maven.backend.auth.username=admin \
+  --set artifusion.config.protocols.maven.backend.auth.password=secure-password
+```
+
+### Security Best Practices
+
+1. **Never commit credentials**: Use secrets or environment variables
+2. **Use strong passwords**: Generate random passwords for backend services
+3. **Rotate credentials**: Regularly update backend passwords
+4. **NetworkPolicy**: Use Kubernetes NetworkPolicy even with auth for defense in depth
+5. **Monitor auth failures**: Check logs for unauthorized access attempts
+
+### Implementation Details
+
+**Code location**: `internal/proxy/client.go:344` - `injectBackendAuth()`
+
+**How it works**:
+1. Artifusion receives client request (authenticated with GitHub PAT)
+2. Protocol handler routes to appropriate backend
+3. Proxy client checks if backend has `auth` configured
+4. If configured, injects appropriate authentication headers
+5. Proxies request to backend with injected credentials
+6. Backend validates credentials and processes request
+
+**Supported backends**:
+- ✓ OCI backends (`OCIBackendConfig.Auth`) - both pull_backends and push_backend
+- ✓ Maven backend (`MavenBackendConfig.Auth`)
+- ✓ NPM backend (`NPMBackendConfig.Auth`)
+
+### Troubleshooting
+
+**401 Unauthorized from backend**:
+```bash
+# Check Artifusion logs for auth injection
+kubectl logs -n namespace pod-name | grep "Injected backend authentication"
+
+# Test backend credentials directly
+curl -u username:password http://backend:port/
+```
+
+**Auth not being injected**:
+- Verify `auth.type` is set (not empty)
+- Verify credentials are populated (username/password, token, or header_name/header_value)
+- Check configuration is loaded: `kubectl get configmap -o yaml`
+
+**Wrong auth type**:
+- Backend returns 401 even with correct credentials
+- Verify backend expects the auth type you configured (basic, bearer, header)
+- Check backend logs for authentication errors
+
 ## Troubleshooting
 
 ### High Latency

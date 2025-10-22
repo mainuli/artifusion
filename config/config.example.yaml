@@ -105,6 +105,20 @@ protocols:
         dial_timeout: 10s
         request_timeout: 300s
 
+        # Optional: Backend authentication (if backend requires credentials)
+        # Uncomment and configure if your registry requires authentication
+        # auth:
+        #   type: basic          # Auth types: basic, bearer, header
+        #   username: registry-user
+        #   password: registry-password
+        #   # Alternatively, for bearer token:
+        #   # type: bearer
+        #   # token: your-bearer-token
+        #   # Or for custom header:
+        #   # type: header
+        #   # header_name: X-Registry-Token
+        #   # header_value: your-token
+
       # 2. GitHub Container Registry (scope-based routing)
       - name: ghcr-mirror
         url: http://oci-registry:8080
@@ -131,7 +145,6 @@ protocols:
         request_timeout: 300s
 
     # Push backend (direct to registry:5000)
-    # No authentication required - backend is on private network
     push_backend:
       name: push
       url: http://registry:5000
@@ -140,6 +153,20 @@ protocols:
       idle_conn_timeout: 90s
       dial_timeout: 10s
       request_timeout: 300s
+
+      # Optional: Backend authentication (if backend requires credentials)
+      # Uncomment and configure if your registry requires authentication
+      # auth:
+      #   type: basic          # Auth types: basic, bearer, header
+      #   username: registry-user
+      #   password: registry-password
+      #   # Alternatively, for bearer token:
+      #   # type: bearer
+      #   # token: your-bearer-token
+      #   # Or for custom header:
+      #   # type: header
+      #   # header_name: X-Registry-Token
+      #   # header_value: your-token
 
   # ===== Maven Repository Protocol =====
   maven:
@@ -217,11 +244,25 @@ protocols:
     #   </repositories>
     #
     # Backend: Reposilite Maven Repository Manager
-    # No authentication required - backend is on private network
     # URL must include the repository name (/maven) since path_prefix is stripped
     backend:
       name: reposilite
       url: http://reposilite:8080/maven
+
+      # Optional: Backend authentication (if backend requires credentials)
+      # Uncomment and configure if your Reposilite instance requires authentication
+      # auth:
+      #   type: basic          # Auth types: basic, bearer, header
+      #   username: admin
+      #   password: admin123
+      #   # Alternatively, for bearer token:
+      #   # type: bearer
+      #   # token: your-bearer-token
+      #   # Or for custom header:
+      #   # type: header
+      #   # header_name: X-API-Key
+      #   # header_value: your-api-key
+
       max_idle_conns: 200
       max_idle_conns_per_host: 100
       idle_conn_timeout: 90s
@@ -250,10 +291,16 @@ protocols:
       realm: "Artifusion NPM Registry"
 
     # Backend: Verdaccio NPM Registry
-    # No authentication required - backend is on private network
     backend:
       name: verdaccio
       url: http://verdaccio:4873
+
+      # Optional: Backend authentication (if backend requires credentials)
+      # Uncomment and configure if your Verdaccio instance requires authentication
+      # auth:
+      #   type: basic          # Auth types: basic, bearer, header
+      #   username: npm-user
+      #   password: npm-password
       max_idle_conns: 200
       max_idle_conns_per_host: 100
       idle_conn_timeout: 90s
