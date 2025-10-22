@@ -8,36 +8,36 @@ metadata:
     "helm.sh/hook": test
 spec:
   containers:
-    - name: wget
-      image: cgr.dev/chainguard/busybox:latest
-      command: ['sh', '-c']
+    - name: curl
+      image: cgr.dev/chainguard/curl:latest-dev
+      command: ['/bin/sh', '-c']
       args:
         - |
           echo "Testing Artifusion health endpoint..."
-          wget --spider --tries=1 --timeout=5 http://{{ include "artifusion.artifusion.serviceName" . }}:{{ .Values.artifusion.service.port }}/health || exit 1
+          curl -f -s --max-time 5 http://{{ include "artifusion.artifusion.serviceName" . }}:{{ .Values.artifusion.service.port }}/health > /dev/null || exit 1
           echo "✓ Artifusion is healthy"
 
           {{- if .Values.ociRegistry.enabled }}
           echo "Testing OCI Registry..."
-          wget --spider --tries=1 --timeout=5 http://{{ include "artifusion.ociRegistry.serviceName" . }}:{{ .Values.ociRegistry.service.port }} || exit 1
+          curl -f -s --max-time 5 http://{{ include "artifusion.ociRegistry.serviceName" . }}:{{ .Values.ociRegistry.service.port }} > /dev/null || exit 1
           echo "✓ OCI Registry is accessible"
           {{- end }}
 
           {{- if .Values.registry.enabled }}
           echo "Testing Docker Registry..."
-          wget --spider --tries=1 --timeout=5 http://{{ include "artifusion.registry.serviceName" . }}:{{ .Values.registry.service.port }} || exit 1
+          curl -f -s --max-time 5 http://{{ include "artifusion.registry.serviceName" . }}:{{ .Values.registry.service.port }} > /dev/null || exit 1
           echo "✓ Docker Registry is accessible"
           {{- end }}
 
           {{- if .Values.reposilite.enabled }}
           echo "Testing Reposilite..."
-          wget --spider --tries=1 --timeout=5 http://{{ include "artifusion.reposilite.serviceName" . }}:{{ .Values.reposilite.service.port }}/api/status || exit 1
+          curl -f -s --max-time 5 http://{{ include "artifusion.reposilite.serviceName" . }}:{{ .Values.reposilite.service.port }}/ > /dev/null || exit 1
           echo "✓ Reposilite is healthy"
           {{- end }}
 
           {{- if .Values.verdaccio.enabled }}
           echo "Testing Verdaccio..."
-          wget --spider --tries=1 --timeout=5 http://{{ include "artifusion.verdaccio.serviceName" . }}:{{ .Values.verdaccio.service.port }}/-/ping || exit 1
+          curl -f -s --max-time 5 http://{{ include "artifusion.verdaccio.serviceName" . }}:{{ .Values.verdaccio.service.port }}/-/ping > /dev/null || exit 1
           echo "✓ Verdaccio is healthy"
           {{- end }}
 
