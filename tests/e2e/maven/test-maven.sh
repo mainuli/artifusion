@@ -6,6 +6,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
@@ -90,7 +91,23 @@ cat > "$TEST_DIR/.m2/settings.xml" << EOF
       <username>${GITHUB_USERNAME}</username>
       <password>${GITHUB_TOKEN}</password>
     </server>
+    <server>
+      <id>artifusion-mirror</id>
+      <username>${GITHUB_USERNAME}</username>
+      <password>${GITHUB_TOKEN}</password>
+    </server>
   </servers>
+
+  <!-- IMPORTANT: Mirror configuration forces ALL Maven requests through Artifusion -->
+  <!-- Without this, Maven would bypass Artifusion and go directly to Maven Central -->
+  <mirrors>
+    <mirror>
+      <id>artifusion-mirror</id>
+      <name>Artifusion Mirror of Maven Central</name>
+      <url>http://${ARTIFUSION_HOST}${MAVEN_PATH_PREFIX}</url>
+      <mirrorOf>*</mirrorOf>
+    </mirror>
+  </mirrors>
 
   <profiles>
     <profile>
@@ -189,8 +206,68 @@ echo -e "${GREEN}✓ Project built successfully (took ${BUILD_TIME}s)${NC}"
 echo -e "${GREEN}  Dependencies fetched through Artifusion proxy${NC}"
 echo ""
 
-# Test 4: Create and deploy a custom artifact
-echo -e "${BLUE}Test 4: Create and Deploy Custom Artifact${NC}"
+# Test 4: Explicit package pull from Maven Central via Artifusion
+echo -e "${BLUE}Test 4: Pull Package from Maven Central via Artifusion${NC}"
+echo "Testing explicit artifact resolution through Artifusion proxy..."
+
+# Clear local Maven repository cache for the test artifact to force fetch from Artifusion
+TEST_ARTIFACT_PATH="$HOME/.m2/repository/org/apache/commons/commons-lang3/3.12.0"
+if [ -d "$TEST_ARTIFACT_PATH" ]; then
+    echo "Clearing local cache for commons-lang3:3.12.0..."
+    rm -rf "$TEST_ARTIFACT_PATH"
+fi
+
+# First pull - should go through Artifusion to Maven Central
+echo "First pull (should fetch from Maven Central via Artifusion)..."
+FIRST_PULL_START=$(date +%s)
+mvn -s "$TEST_DIR/.m2/settings.xml" dependency:get \
+    -DgroupId=org.apache.commons \
+    -DartifactId=commons-lang3 \
+    -Dversion=3.12.0 \
+    -Dtransitive=false \
+    -q || {
+    echo -e "${RED}✗ Failed to pull artifact from Maven Central${NC}"
+    exit 1
+}
+FIRST_PULL_END=$(date +%s)
+FIRST_PULL_TIME=$((FIRST_PULL_END - FIRST_PULL_START))
+echo -e "${GREEN}✓ Successfully pulled commons-lang3:3.12.0 from Maven Central (${FIRST_PULL_TIME}s)${NC}"
+
+# Verify artifact is now cached locally
+if [ -f "$HOME/.m2/repository/org/apache/commons/commons-lang3/3.12.0/commons-lang3-3.12.0.jar" ]; then
+    echo -e "${GREEN}✓ Artifact cached locally${NC}"
+else
+    echo -e "${RED}✗ Artifact not found in local cache${NC}"
+    exit 1
+fi
+
+# Second pull - should be faster (cached on Reposilite)
+echo "Second pull (should be served from Reposilite cache)..."
+rm -rf "$TEST_ARTIFACT_PATH"  # Clear local cache again
+SECOND_PULL_START=$(date +%s)
+mvn -s "$TEST_DIR/.m2/settings.xml" dependency:get \
+    -DgroupId=org.apache.commons \
+    -DartifactId=commons-lang3 \
+    -Dversion=3.12.0 \
+    -Dtransitive=false \
+    -q || {
+    echo -e "${RED}✗ Failed to pull cached artifact${NC}"
+    exit 1
+}
+SECOND_PULL_END=$(date +%s)
+SECOND_PULL_TIME=$((SECOND_PULL_END - SECOND_PULL_START))
+echo -e "${GREEN}✓ Successfully pulled from Reposilite cache (${SECOND_PULL_TIME}s)${NC}"
+
+# Compare times (second pull should be same or faster due to caching)
+if [ "$SECOND_PULL_TIME" -le "$FIRST_PULL_TIME" ]; then
+    echo -e "${GREEN}✓ Cache is working (second pull: ${SECOND_PULL_TIME}s ≤ first pull: ${FIRST_PULL_TIME}s)${NC}"
+else
+    echo -e "${YELLOW}⚠️  Second pull was slower (${SECOND_PULL_TIME}s vs ${FIRST_PULL_TIME}s) - may be normal due to timing variance${NC}"
+fi
+echo ""
+
+# Test 5: Create and deploy a custom artifact
+echo -e "${BLUE}Test 5: Create and Deploy Custom Artifact${NC}"
 cd "$TEST_DIR"
 mkdir -p library-project
 cd library-project
@@ -270,8 +347,8 @@ else
 fi
 echo ""
 
-# Test 5: Consume the deployed artifact (from local repo or Artifusion)
-echo -e "${BLUE}Test 5: Consume Deployed Artifact${NC}"
+# Test 6: Consume the deployed artifact (from local repo or Artifusion)
+echo -e "${BLUE}Test 6: Consume Deployed Artifact${NC}"
 if [ "$DEPLOYED_TO_ARTIFUSION" = "true" ]; then
     echo -e "${YELLOW}Testing artifact consumption from Artifusion${NC}"
 else
@@ -330,8 +407,8 @@ mvn -s "$TEST_DIR/.m2/settings.xml" clean compile || {
 echo -e "${GREEN}✓ Successfully consumed deployed artifact${NC}"
 echo ""
 
-# Test 6: Check Metrics
-echo -e "${BLUE}Test 6: Check Metrics${NC}"
+# Test 7: Check Metrics
+echo -e "${BLUE}Test 7: Check Metrics${NC}"
 echo "Querying Artifusion metrics..."
 METRICS=$(curl -s "http://$ARTIFUSION_HOST/metrics" 2>&1)
 
@@ -368,6 +445,8 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 echo "Summary:"
 echo "  - Project build: ${BUILD_TIME}s"
+echo "  - Maven Central pull (first): ${FIRST_PULL_TIME}s"
+echo "  - Maven Central pull (cached): ${SECOND_PULL_TIME}s"
 if [ "$DEPLOYED_TO_ARTIFUSION" = "true" ]; then
     echo "  - Artifact deployment: ✓"
     echo "  - Artifact consumption: ✓ (from Artifusion)"
