@@ -1,0 +1,86 @@
+{{- if .Values.ociRegistry.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "artifusion.ociRegistry.serviceName" . }}
+  labels:
+    {{- include "artifusion.ociRegistry.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "artifusion.ociRegistry.serviceName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "artifusion.ociRegistry.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/oci-registry/configmap.yaml") . | sha256sum }}
+        {{- if or .Values.secrets.github.token .Values.secrets.dockerhub.token }}
+        checksum/secret: {{ include (print $.Template.BasePath "/oci-registry/secret.yaml") . | sha256sum }}
+        {{- end }}
+      labels:
+        {{- include "artifusion.ociRegistry.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- include "artifusion.imagePullSecrets" . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.ociRegistry.podSecurityContext | nindent 8 }}
+      containers:
+        - name: oci-registry
+          securityContext:
+            {{- toYaml .Values.ociRegistry.securityContext | nindent 12 }}
+          image: {{ include "artifusion.ociRegistry.image" . }}
+          imagePullPolicy: {{ .Values.ociRegistry.image.pullPolicy }}
+          args:
+            - --listen
+            - 0.0.0.0:8080
+            - --upstream-config-file
+            - /config/oci-registry-upstream.yaml
+            - filesystem
+            - --root
+            - /var/lib/oci-cache
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: OCI_REGISTRY_UPSTREAM
+              value: "/config/oci-registry-upstream.yaml"
+            {{- if or .Values.secrets.github.token .Values.secrets.dockerhub.token }}
+            - name: UPSTREAM_CREDENTIALS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifusion.ociRegistry.serviceName" . }}-creds
+                  key: credentials
+            {{- end }}
+          resources:
+            {{- toYaml .Values.ociRegistry.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/oci-cache
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "artifusion.ociRegistry.serviceName" . }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        annotations:
+          helm.sh/resource-policy: keep
+      spec:
+        accessModes: [ {{ .Values.ociRegistry.storage.accessMode | quote }} ]
+        {{- if .Values.ociRegistry.storage.storageClass }}
+        storageClassName: {{ .Values.ociRegistry.storage.storageClass | quote }}
+        {{- else if .Values.global.storageClass }}
+        storageClassName: {{ .Values.global.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.ociRegistry.storage.size }}
+{{- end }}

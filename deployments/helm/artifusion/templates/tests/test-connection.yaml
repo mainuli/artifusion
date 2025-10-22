@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "artifusion.fullname" . }}-test-connection
+  labels:
+    {{- include "artifusion.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: curl
+      image: cgr.dev/chainguard/curl:latest-dev
+      command: ['/bin/sh', '-c']
+      args:
+        - |
+          echo "Testing Artifusion health endpoint..."
+          curl -f -s --max-time 5 http://{{ include "artifusion.artifusion.serviceName" . }}:{{ .Values.artifusion.service.port }}/health > /dev/null || exit 1
+          echo "✓ Artifusion is healthy"
+
+          {{- if .Values.ociRegistry.enabled }}
+          echo "Testing OCI Registry..."
+          curl -f -s --max-time 5 http://{{ include "artifusion.ociRegistry.serviceName" . }}:{{ .Values.ociRegistry.service.port }} > /dev/null || exit 1
+          echo "✓ OCI Registry is accessible"
+          {{- end }}
+
+          {{- if .Values.registry.enabled }}
+          echo "Testing Docker Registry..."
+          curl -f -s --max-time 5 http://{{ include "artifusion.registry.serviceName" . }}:{{ .Values.registry.service.port }} > /dev/null || exit 1
+          echo "✓ Docker Registry is accessible"
+          {{- end }}
+
+          {{- if .Values.reposilite.enabled }}
+          echo "Testing Reposilite..."
+          curl -f -s --max-time 5 http://{{ include "artifusion.reposilite.serviceName" . }}:{{ .Values.reposilite.service.port }}/ > /dev/null || exit 1
+          echo "✓ Reposilite is healthy"
+          {{- end }}
+
+          {{- if .Values.verdaccio.enabled }}
+          echo "Testing Verdaccio..."
+          curl -f -s --max-time 5 http://{{ include "artifusion.verdaccio.serviceName" . }}:{{ .Values.verdaccio.service.port }}/-/ping > /dev/null || exit 1
+          echo "✓ Verdaccio is healthy"
+          {{- end }}
+
+          echo "All tests passed!"
+  restartPolicy: Never

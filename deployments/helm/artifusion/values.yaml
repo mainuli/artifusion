@@ -1,0 +1,607 @@
+# Default values for artifusion Helm chart.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+## @section Global parameters
+## Global Docker image parameters
+## Please, note that this will override the image parameters, including dependencies, configured to use the global value
+## Current available global Docker image parameters: imageRegistry, imagePullSecrets and storageClass
+
+## @param global.imageRegistry Global Docker image registry
+## @param global.imagePullSecrets Global Docker registry secret names as an array
+## @param global.storageClass Global StorageClass for Persistent Volume(s)
+global:
+  imageRegistry: ""
+  ## E.g.
+  ## imagePullSecrets:
+  ##   - myRegistryKeySecretName
+  imagePullSecrets: []
+  storageClass: ""
+
+## @param nameOverride String to partially override common.names.fullname template (will maintain the release name)
+nameOverride: ""
+
+## @param fullnameOverride String to fully override common.names.fullname template
+fullnameOverride: ""
+
+## @section Secret parameters
+## Upstream registry credentials for backend services
+
+secrets:
+  ## @param secrets.github.username GitHub username for GHCR and GitHub Packages authentication
+  ## @param secrets.github.token GitHub Personal Access Token with read:packages scope
+  ## Required if using GHCR or GitHub Packages (when artifusion.config.github.required_org is set)
+  github:
+    username: ""
+    token: ""
+
+  ## @param secrets.dockerhub.username Docker Hub username (optional)
+  ## @param secrets.dockerhub.token Docker Hub access token (optional)
+  ## Used to avoid Docker Hub rate limits (100 pulls/6h anonymous, 200 pulls/6h authenticated)
+  dockerhub:
+    username: ""
+    token: ""
+
+## @section Artifusion parameters
+## Artifusion is the main reverse proxy gateway
+
+artifusion:
+  ## @param artifusion.enabled Enable Artifusion deployment
+  enabled: true
+
+  ## @param artifusion.replicaCount Number of Artifusion replicas to deploy
+  ## For production, increase to 3+ for high availability
+  replicaCount: 1
+
+  ## Artifusion image configuration
+  ## @param artifusion.image.repository Artifusion image repository
+  ## @param artifusion.image.tag Artifusion image tag (immutable tags are recommended)
+  ## @param artifusion.image.pullPolicy Artifusion image pull policy
+  image:
+    repository: ghcr.io/mainuli/artifusion
+    tag: ""  # Defaults to .Chart.AppVersion
+    pullPolicy: IfNotPresent
+
+  ## Artifusion configuration (maps to config.yaml)
+  ## @param artifusion.config Artifusion configuration object
+  config:
+    ## Server configuration
+    server:
+      port: 8080
+      read_timeout: 60s
+      write_timeout: 300s
+      max_concurrent_requests: 10000
+
+    ## GitHub authentication configuration
+    github:
+      ## @param artifusion.config.github.required_org GitHub organization required for access (empty = allow any GitHub user)
+      ## When set, automatically configures GitHub Packages for all backend services
+      required_org: ""
+      required_teams: []
+      api_url: "https://api.github.com"
+      auth_cache_ttl: 30m
+
+    ## Protocol configuration
+    protocols:
+      ## OCI/Docker Registry protocol
+      oci:
+        enabled: true
+        host: ""  # Optional: Set for host-based routing (e.g., "docker.example.com"). OCI always uses /v2 path per OCI Distribution Spec.
+        pull_backends:
+          - name: "local-hosted"
+            url: "http://RELEASE_NAME-registry:5000"  # Will be replaced in template
+            upstream_namespace: ""
+            scope: ["*"]
+            ## Optional: Backend authentication (if backend requires credentials)
+            # auth:
+            #   type: "basic"
+            #   username: "registry-user"
+            #   password: "registry-password"
+          - name: "ghcr-cache"
+            url: "http://RELEASE_NAME-oci-registry:8080"  # Will be replaced in template
+            upstream_namespace: "ghcr.io"
+            scope: []  # Uses github.required_org if set
+          - name: "dockerhub-cache"
+            url: "http://RELEASE_NAME-oci-registry:8080"  # Will be replaced in template
+            upstream_namespace: "docker.io"
+            scope: ["*"]
+            path_rewrite:
+              add_library_prefix: true
+        push_backend:
+          name: "local-hosted"
+          url: "http://RELEASE_NAME-registry:5000"  # Will be replaced in template
+          ## Optional: Backend authentication (if backend requires credentials)
+          # auth:
+          #   type: "basic"
+          #   username: "registry-user"
+          #   password: "registry-password"
+
+      ## Maven repository protocol
+      maven:
+        enabled: true
+        host: ""
+        path_prefix: "/maven"
+        backend:
+          name: "reposilite"
+          url: "http://RELEASE_NAME-reposilite:8080/maven"  # Will be replaced in template (includes repository name)
+          ## Optional: Backend authentication (if backend requires credentials)
+          ## Artifusion injects these credentials when proxying to the backend
+          ## Note: This is separate from client authentication (GitHub PAT)
+          # auth:
+          #   type: "basic"          # Auth types: basic, bearer, header
+          #   username: "admin"      # For basic auth
+          #   password: "admin123"   # For basic auth
+          #   # Alternatively, for bearer token auth:
+          #   # type: "bearer"
+          #   # token: "your-bearer-token"
+          #   # Or for custom header auth:
+          #   # type: "header"
+          #   # header_name: "X-API-Key"
+          #   # header_value: "your-api-key"
+
+      ## NPM registry protocol
+      npm:
+        enabled: true
+        host: ""
+        path_prefix: "/npm"
+        backend:
+          name: "verdaccio"
+          url: "http://RELEASE_NAME-verdaccio:4873"  # Will be replaced in template
+          ## Optional: Backend authentication (if backend requires credentials)
+          ## Artifusion injects these credentials when proxying to the backend
+          # auth:
+          #   type: "basic"          # Auth types: basic, bearer, header
+          #   username: "npm-user"
+          #   password: "npm-password"
+
+    ## Rate limiting configuration
+    rate_limit:
+      enabled: true
+      requests_per_sec: 1000.0
+      per_user_requests: 100.0
+
+    ## Metrics configuration
+    metrics:
+      enabled: true
+      path: "/metrics"
+
+    ## Logging configuration
+    logging:
+      level: "info"
+      format: "json"
+      force_color: false
+
+  ## Artifusion resource requests and limits
+  ## @param artifusion.resources.requests Resource requests for Artifusion container
+  ## @param artifusion.resources.limits Resource limits for Artifusion container
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  ## Liveness probe configuration
+  ## @param artifusion.livenessProbe Liveness probe configuration
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  ## Readiness probe configuration
+  ## @param artifusion.readinessProbe Readiness probe configuration
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  ## Pod security context
+  ## @param artifusion.podSecurityContext Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
+
+  ## Container security context
+  ## @param artifusion.securityContext Container security context
+  securityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+  ## Service configuration
+  ## @param artifusion.service.type Kubernetes service type
+  ## @param artifusion.service.port Kubernetes service port
+  service:
+    type: ClusterIP
+    port: 8080
+
+  ## Autoscaling configuration
+  ## @param artifusion.autoscaling.enabled Enable Horizontal Pod Autoscaler
+  ## @param artifusion.autoscaling.minReplicas Minimum number of replicas
+  ## @param artifusion.autoscaling.maxReplicas Maximum number of replicas
+  ## @param artifusion.autoscaling.targetCPUUtilizationPercentage Target CPU utilization percentage
+  ## @param artifusion.autoscaling.targetMemoryUtilizationPercentage Target memory utilization percentage
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 80
+
+  ## Pod Disruption Budget
+  ## @param artifusion.podDisruptionBudget.enabled Enable Pod Disruption Budget
+  ## @param artifusion.podDisruptionBudget.maxUnavailable Maximum number of unavailable pods
+  podDisruptionBudget:
+    enabled: false  # Enable in production with multiple replicas
+    maxUnavailable: 1
+
+  ## ServiceMonitor configuration for Prometheus Operator
+  ## @param artifusion.serviceMonitor.enabled Create ServiceMonitor resource
+  ## @param artifusion.serviceMonitor.interval Prometheus scrape interval
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+
+## @section OCI Registry parameters
+## mcronce/oci-registry - Pull-through cache with multi-upstream support
+
+ociRegistry:
+  ## @param ociRegistry.enabled Enable OCI Registry StatefulSet
+  enabled: true
+
+  ## OCI Registry image configuration
+  ## @param ociRegistry.image.repository OCI Registry image repository
+  ## @param ociRegistry.image.tag OCI Registry image tag
+  ## @param ociRegistry.image.pullPolicy OCI Registry image pull policy
+  image:
+    repository: mcronce/oci-registry
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  ## OCI Registry upstream configuration
+  ## @param ociRegistry.upstreams Upstream registries (GHCR + Docker Hub)
+  upstreams:
+    - namespace: "ghcr.io"
+      host: "ghcr.io"
+      tls: true
+      manifest_invalidation_time: 336h  # 14 days
+      blob_invalidation_time: 336h
+    - namespace: "docker.io"
+      host: "registry-1.docker.io"
+      tls: true
+      manifest_invalidation_time: 336h
+      blob_invalidation_time: 336h
+
+  ## OCI Registry storage configuration
+  ## @param ociRegistry.storage.size PVC size
+  ## @param ociRegistry.storage.storageClass StorageClass to use
+  ## @param ociRegistry.storage.accessMode PVC access mode
+  storage:
+    size: 100Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+
+  ## OCI Registry resource requests and limits
+  ## @param ociRegistry.resources.requests Resource requests for OCI Registry container
+  ## @param ociRegistry.resources.limits Resource limits for OCI Registry container
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+  ## Pod security context
+  ## @param ociRegistry.podSecurityContext Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  ## Container security context
+  ## @param ociRegistry.securityContext Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+  ## Service configuration
+  ## @param ociRegistry.service.type Kubernetes service type
+  ## @param ociRegistry.service.port Kubernetes service port
+  service:
+    type: ClusterIP
+    port: 8080
+
+## @section Registry parameters
+## registry:2 - Hosted OCI/Docker registry for push operations
+
+registry:
+  ## @param registry.enabled Enable Docker Registry StatefulSet
+  enabled: true
+
+  ## Registry image configuration
+  ## @param registry.image.repository Registry image repository
+  ## @param registry.image.tag Registry image tag
+  ## @param registry.image.pullPolicy Registry image pull policy
+  image:
+    repository: registry
+    tag: "2"
+    pullPolicy: IfNotPresent
+
+  ## Registry configuration
+  ## @param registry.config Registry config.yml content
+  config:
+    version: 0.1
+    storage:
+      filesystem:
+        rootdirectory: /var/lib/registry
+      delete:
+        enabled: true
+    http:
+      addr: :5000
+      headers:
+        X-Content-Type-Options: [nosniff]
+    health:
+      storagedriver:
+        enabled: true
+        interval: 10s
+        threshold: 3
+
+  ## Registry storage configuration
+  ## @param registry.storage.size PVC size
+  ## @param registry.storage.storageClass StorageClass to use
+  ## @param registry.storage.accessMode PVC access mode
+  storage:
+    size: 100Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+
+  ## Registry resource requests and limits
+  ## @param registry.resources.requests Resource requests for Registry container
+  ## @param registry.resources.limits Resource limits for Registry container
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  ## Pod security context
+  ## @param registry.podSecurityContext Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  ## Container security context
+  ## @param registry.securityContext Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+  ## Service configuration
+  ## @param registry.service.type Kubernetes service type
+  ## @param registry.service.port Kubernetes service port
+  service:
+    type: ClusterIP
+    port: 5000
+
+## @section Reposilite parameters
+## dzikoysk/reposilite - Maven repository manager
+
+reposilite:
+  ## @param reposilite.enabled Enable Reposilite StatefulSet
+  enabled: true
+
+  ## Reposilite image configuration
+  ## @param reposilite.image.repository Reposilite image repository
+  ## @param reposilite.image.tag Reposilite image tag
+  ## @param reposilite.image.pullPolicy Reposilite image pull policy
+  image:
+    repository: dzikoysk/reposilite
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  ## Reposilite automatically configures:
+  ## - releases, snapshots (hosted repositories)
+  ## - maven-central (mirror to repo.maven.apache.org)
+  ## - github-packages (mirror to maven.pkg.github.com/ORG/* - if required_org is set)
+
+  ## Reposilite storage configuration
+  ## @param reposilite.storage.size PVC size
+  ## @param reposilite.storage.storageClass StorageClass to use
+  ## @param reposilite.storage.accessMode PVC access mode
+  storage:
+    size: 50Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+
+  ## Reposilite resource requests and limits
+  ## @param reposilite.resources.requests Resource requests for Reposilite container
+  ## @param reposilite.resources.limits Resource limits for Reposilite container
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+  ## Pod security context
+  ## @param reposilite.podSecurityContext Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  ## Container security context
+  ## @param reposilite.securityContext Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+  ## Service configuration
+  ## @param reposilite.service.type Kubernetes service type
+  ## @param reposilite.service.port Kubernetes service port
+  service:
+    type: ClusterIP
+    port: 8080
+
+## @section Verdaccio parameters
+## verdaccio/verdaccio - NPM registry cache
+
+verdaccio:
+  ## @param verdaccio.enabled Enable Verdaccio StatefulSet
+  enabled: true
+
+  ## Verdaccio image configuration
+  ## @param verdaccio.image.repository Verdaccio image repository
+  ## @param verdaccio.image.tag Verdaccio image tag
+  ## @param verdaccio.image.pullPolicy Verdaccio image pull policy
+  image:
+    repository: verdaccio/verdaccio
+    tag: "6"
+    pullPolicy: IfNotPresent
+
+  ## Verdaccio automatically configures:
+  ## - npmjs uplink (registry.npmjs.org) - always
+  ## - github uplink (npm.pkg.github.com with @ORG/* scope - if required_org is set)
+
+  ## Verdaccio storage configuration
+  ## @param verdaccio.storage.size PVC size
+  ## @param verdaccio.storage.storageClass StorageClass to use
+  ## @param verdaccio.storage.accessMode PVC access mode
+  storage:
+    size: 50Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+
+  ## Verdaccio resource requests and limits
+  ## @param verdaccio.resources.requests Resource requests for Verdaccio container
+  ## @param verdaccio.resources.limits Resource limits for Verdaccio container
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  ## Pod security context
+  ## @param verdaccio.podSecurityContext Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    fsGroup: 65533
+
+  ## Container security context
+  ## @param verdaccio.securityContext Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+  ## Service configuration
+  ## @param verdaccio.service.type Kubernetes service type
+  ## @param verdaccio.service.port Kubernetes service port
+  service:
+    type: ClusterIP
+    port: 4873
+
+## @section Ingress parameters
+## Nginx Ingress configuration
+
+ingress:
+  ## @param ingress.enabled Enable Ingress
+  enabled: true
+
+  ## @param ingress.className Ingress class name
+  className: nginx
+
+  ## @param ingress.hosts Ingress hosts configuration
+  ## For host-based routing, use different domains per protocol
+  ## For path-based routing, use single domain with different paths
+  hosts:
+    - host: docker.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: maven.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: npm.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+  ## Alternative path-based routing example:
+  ## hosts:
+  ##   - host: artifacts.example.com
+  ##     paths:
+  ##       - path: /oci
+  ##         pathType: Prefix
+  ##       - path: /maven
+  ##         pathType: Prefix
+  ##       - path: /npm
+  ##         pathType: Prefix
+
+  ## @param ingress.tls Ingress TLS configuration
+  tls:
+    - secretName: artifusion-tls
+      hosts:
+        - docker.example.com
+        - maven.example.com
+        - npm.example.com
+
+  ## @param ingress.annotations Ingress annotations
+  ## Default annotations are optimized for artifact proxy use case (large files, long transfers)
+  ## These defaults assume nginx ingress controller.
+  ##
+  ## To ADD additional annotations, use helm -f or --set (annotations will be merged):
+  ##   helm install artifusion ./artifusion --set ingress.annotations.custom/key=value
+  ##
+  ## To COMPLETELY REPLACE annotations (for other ingress controllers), set ALL annotations:
+  ##   annotations:
+  ##     traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
+  ##     traefik.ingress.kubernetes.io/router.middlewares: "default-ratelimit@kubernetescrd"
+  ##
+  ## Or remove nginx defaults explicitly in your values file:
+  ##   annotations:
+  ##     nginx.ingress.kubernetes.io/proxy-body-size: null
+  ##     haproxy.org/timeout-client: "600s"
+  ##
+  annotations:
+    # Unlimited request body size - required for large artifact uploads (Docker images, JARs, etc.)
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    # Extended timeouts (10 minutes) - required for large artifact downloads/uploads
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    # Disable buffering - enables streaming for large files
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # Force HTTPS redirect for security
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Uncomment to enable cert-manager automatic TLS certificate provisioning:
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+## @section Network Policy parameters
+
+networkPolicy:
+  ## @param networkPolicy.enabled Enable NetworkPolicy
+  ## When enabled, restricts backend services to only accept traffic from Artifusion pods
+  enabled: false

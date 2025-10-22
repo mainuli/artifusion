@@ -1,0 +1,146 @@
+{{- if .Values.reposilite.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "artifusion.reposilite.serviceName" . }}
+  labels:
+    {{- include "artifusion.reposilite.labels" . | nindent 4 }}
+data:
+  configuration.cdn: |
+    # Reposilite 3 Local Configuration
+    # Instance infrastructure settings
+    # Documentation: https://reposilite.com/guide/general
+
+    # Network binding
+    hostname: 0.0.0.0
+    port: 8080
+
+    # Database configuration
+    database: sqlite reposilite.db
+
+    # Frontend
+    # Disable default frontend dashboard (API-only mode)
+    # Artifusion handles authentication and routing
+    defaultFrontend: false
+
+    # Thread pools
+    webThreadPool: 16
+    ioThreadPool: 8
+    databaseThreadPool: 1
+
+    # Performance
+    compressionStrategy: none
+    idleTimeout: 30000
+
+    # Caching
+    bypassExternalCache: true
+    cachedLogSize: 50
+
+    # Debug
+    debugEnabled: false
+
+  configuration.shared.json: |
+    {
+      "authentication": {
+        "ldap": {
+          "enabled": false
+        }
+      },
+      "statistics": {
+        "enabled": true,
+        "resolvedRequestsInterval": "MONTHLY"
+      },
+      "web": {
+        "forwardedIp": "X-Forwarded-For"
+      },
+      "maven": {
+        "repositories": [
+          {
+            "id": "maven",
+            "visibility": "PUBLIC",
+            "redeployment": true,
+            "preserveSnapshots": true,
+            "storageProvider": {
+              "type": "fs",
+              "quota": "100%",
+              "mount": "",
+              "maxResourceLockLifetimeInSeconds": 60
+            },
+            "storagePolicy": "PRIORITIZE_UPSTREAM_METADATA",
+            "metadataMaxAge": 0,
+            "proxied": [
+              {{- if .Values.artifusion.config.github.required_org }}
+              {
+                "reference": "https://maven.pkg.github.com/{{ .Values.artifusion.config.github.required_org }}/*/",
+                "store": true,
+                "allowedGroups": [],
+                "allowedExtensions": [],
+                "connectTimeout": 3,
+                "readTimeout": 15,
+                "authorization": {
+                  "method": "BASIC",
+                  "login": "${GITHUB_PACKAGES_USERNAME}",
+                  "password": "${GITHUB_PACKAGES_TOKEN}"
+                },
+                "httpProxy": ""
+              },
+              {{- end }}
+              {
+                "reference": "https://repo.maven.apache.org/maven2/",
+                "store": true,
+                "allowedGroups": [],
+                "allowedExtensions": [],
+                "connectTimeout": 3,
+                "readTimeout": 15,
+                "httpProxy": ""
+              },
+              {
+                "reference": "https://jaspersoft.jfrog.io/jaspersoft/third-party-ce-artifacts/",
+                "store": true,
+                "allowedGroups": [],
+                "allowedExtensions": [],
+                "connectTimeout": 3,
+                "readTimeout": 15,
+                "httpProxy": ""
+              },
+              {
+                "reference": "https://repo.spring.io/release",
+                "store": true,
+                "allowedGroups": [],
+                "allowedExtensions": [],
+                "connectTimeout": 3,
+                "readTimeout": 15,
+                "httpProxy": ""
+              },
+              {
+                "reference": "https://oss.sonatype.org/content/repositories/snapshots/",
+                "store": true,
+                "allowedGroups": [],
+                "allowedExtensions": [],
+                "connectTimeout": 3,
+                "readTimeout": 15,
+                "httpProxy": ""
+              },
+              {
+                "reference": "https://plugins.gradle.org/m2/",
+                "store": true,
+                "allowedGroups": [],
+                "allowedExtensions": [],
+                "connectTimeout": 3,
+                "readTimeout": 15,
+                "httpProxy": ""
+              }
+            ]
+          }
+        ]
+      },
+      "frontend": {
+        "id": "artifusion-repository",
+        "title": "Artifusion Maven Repository",
+        "description": "Unified Maven repository with GitHub authentication",
+        "organizationWebsite": "https://github.com/mainuli/artifusion",
+        "organizationLogo": "",
+        "icpLicense": ""
+      }
+    }
+{{- end }}

@@ -1,0 +1,348 @@
+# Artifusion Configuration Example
+# Multi-Protocol Reverse Proxy with GitHub Authentication
+
+# ===== Server Configuration =====
+server:
+  port: 8080
+
+  # NOTE: Artifusion dynamically constructs URLs for responses based on:
+  # - Host-based routing: Uses the protocol's configured 'host' field
+  # - Path-based routing: Detects from request headers (Forwarded, X-Forwarded-Host, Host)
+  # - Scheme (http/https): Detects from Forwarded proto, X-Forwarded-Proto, or TLS state
+  #
+  # Ensure your reverse proxy sets these headers:
+  #   - X-Forwarded-Host (or Forwarded with host parameter)
+  #   - X-Forwarded-Proto (or Forwarded with proto parameter)
+  #
+  # Example nginx config:
+  #   proxy_set_header X-Forwarded-Host $host;
+  #   proxy_set_header X-Forwarded-Proto $scheme;
+
+  read_timeout: 60s
+  write_timeout: 300s    # 5 minutes for large uploads
+  idle_timeout: 120s     # Keep-alive timeout
+  shutdown_timeout: 30s
+  max_header_bytes: 1048576  # 1MB
+  read_buffer_size: 32768    # 32KB
+  write_buffer_size: 32768   # 32KB
+  max_concurrent_requests: 10000  # Max concurrent requests
+
+# ===== GitHub Authentication =====
+github:
+  api_url: https://api.github.com
+
+  # Organization requirement (empty = allow any valid GitHub user)
+  required_org: ""
+  # required_org: my-organization
+
+  # Team requirements (only checked if required_org is set)
+  required_teams: []
+  # required_teams: [platform-team, security-team]
+
+  # Auth cache TTL (reduces GitHub API calls by ~99%)
+  auth_cache_ttl: 30m
+
+  # Rate limit warning threshold
+  rate_limit_buffer: 100
+
+# ===== Rate Limiting =====
+rate_limit:
+  enabled: true
+  requests_per_sec: 1000.0
+  burst: 2000
+  per_user_enabled: true
+  per_user_requests: 100.0
+  per_user_burst: 200
+
+# ===== Protocol Handlers =====
+#
+# Two deployment models are supported:
+#
+# MODEL 1: Host-based routing (different domains per protocol)
+#   - Set `host` for each protocol (e.g., "npm.example.com", "maven.example.com")
+#   - Set `path_prefix` to "" for root path, or specify a prefix for namespacing
+#   - Requests are routed by the Host header (reverse proxy aware)
+#   - Example: npm.example.com/@scope/package -> NPM handler
+#             maven.example.com/releases/... -> Maven handler
+#
+# MODEL 2: Path-based routing (shared domain, different paths)
+#   - Leave `host` empty ("") for all protocols
+#   - Set `path_prefix` to unique value for each protocol (REQUIRED)
+#   - Requests are routed by URL path prefix
+#   - Example: artifusion.example.com/npm/@scope/package -> NPM handler
+#             artifusion.example.com/maven/releases/... -> Maven handler
+#
+# The example below uses MODEL 2 (path-based routing with shared domain).
+# For MODEL 1 examples, see comments in each protocol section.
+#
+protocols:
+
+  # ===== OCI/Docker Registry Protocol =====
+  oci:
+    enabled: true
+
+    # Optional: Domain for host-based routing (e.g., docker.example.com)
+    # Leave empty for path-based routing (shared domain)
+    # When set, only requests to this host will be routed to OCI handler
+    host: ""
+
+    client_auth:
+      supported_schemes: [bearer, basic]
+      realm: ""  # Empty = direct auth, no token endpoint
+      service: "artifusion"
+
+    # Pull backends (cascade by array order - first = highest priority)
+    pull_backends:
+      # 1. Local hosted registry (highest priority)
+      - name: local-hosted
+        url: http://registry:5000
+        upstream_namespace: ""
+        path_rewrite:
+          add_library_prefix: false
+        max_idle_conns: 200
+        max_idle_conns_per_host: 100
+        idle_conn_timeout: 90s
+        dial_timeout: 10s
+        request_timeout: 300s
+
+        # Optional: Backend authentication (if backend requires credentials)
+        # Uncomment and configure if your registry requires authentication
+        # auth:
+        #   type: basic          # Auth types: basic, bearer, header
+        #   username: registry-user
+        #   password: registry-password
+        #   # Alternatively, for bearer token:
+        #   # type: bearer
+        #   # token: your-bearer-token
+        #   # Or for custom header:
+        #   # type: header
+        #   # header_name: X-Registry-Token
+        #   # header_value: your-token
+
+      # 2. GitHub Container Registry (scope-based routing)
+      - name: ghcr-mirror
+        url: http://oci-registry:8080
+        upstream_namespace: ghcr.io
+        scope: []  # Empty: use required_org | ["*"]: all orgs | [org1, org2]: specific orgs
+        path_rewrite:
+          add_library_prefix: false
+        max_idle_conns: 200
+        max_idle_conns_per_host: 100
+        idle_conn_timeout: 90s
+        dial_timeout: 10s
+        request_timeout: 300s
+
+      # 3. Docker Hub (with library/ prefix for official images)
+      - name: dockerhub-mirror
+        url: http://oci-registry:8080
+        upstream_namespace: docker.io
+        path_rewrite:
+          add_library_prefix: true
+        max_idle_conns: 200
+        max_idle_conns_per_host: 100
+        idle_conn_timeout: 90s
+        dial_timeout: 10s
+        request_timeout: 300s
+
+    # Push backend (direct to registry:5000)
+    push_backend:
+      name: push
+      url: http://registry:5000
+      max_idle_conns: 200
+      max_idle_conns_per_host: 100
+      idle_conn_timeout: 90s
+      dial_timeout: 10s
+      request_timeout: 300s
+
+      # Optional: Backend authentication (if backend requires credentials)
+      # Uncomment and configure if your registry requires authentication
+      # auth:
+      #   type: basic          # Auth types: basic, bearer, header
+      #   username: registry-user
+      #   password: registry-password
+      #   # Alternatively, for bearer token:
+      #   # type: bearer
+      #   # token: your-bearer-token
+      #   # Or for custom header:
+      #   # type: header
+      #   # header_name: X-Registry-Token
+      #   # header_value: your-token
+
+  # ===== Maven Repository Protocol =====
+  maven:
+    enabled: true
+
+    # Host-based routing (optional)
+    # Set to domain name (e.g., "maven.example.com") for domain-based routing
+    # Leave empty for path-based routing (shared domain)
+    # When set, only requests to this host will be routed to Maven handler
+    host: ""
+
+    # Path prefix for Maven requests
+    # REQUIRED when host is empty (path-based routing)
+    # Optional when host is set (can be "" for root path)
+    # Artifusion strips this prefix before forwarding to backend
+    # Example: Client requests /maven/com/example/app/1.0/app-1.0.jar
+    #   -> Prefix stripped: /com/example/app/1.0/app-1.0.jar
+    #   -> Forwarded to: http://reposilite:8080/maven/com/example/app/1.0/app-1.0.jar
+    # (Note: Backend URL includes repository name to reconstruct full path)
+    path_prefix: /maven
+
+    client_auth:
+      supported_schemes: [basic, bearer]
+      realm: "Artifusion Maven Repository"
+
+    # Backend: Reposilite 3 Maven Repository Manager
+    #
+    # UNIFIED REPOSITORY APPROACH (Reposilite 3.x):
+    # Reposilite is configured with a single "maven" repository that:
+    #   - Accepts artifact deployments (releases and snapshots)
+    #   - Proxies/mirrors multiple upstream Maven repositories
+    #   - Caches all proxied artifacts locally
+    #
+    # Configuration structure (configuration.shared.json):
+    #   - Main repository: "maven"
+    #     - Hosts local deployments
+    #     - Has "proxied" array with multiple upstream configurations
+    #
+    #   - Upstream proxied repositories (in order):
+    #     - github-packages: https://maven.pkg.github.com/YOUR_ORG/*/ (requires org in path)
+    #     - maven-central: https://repo.maven.apache.org/maven2/
+    #     - jaspersoft-jfrog: https://jaspersoft.jfrog.io/jaspersoft/third-party-ce-artifacts/
+    #     - spring-releases: https://repo.spring.io/release
+    #     - sonatype-snapshots: https://oss.sonatype.org/content/repositories/snapshots/
+    #     - gradle-plugins: https://plugins.gradle.org/m2/
+    #
+    # IMPORTANT: GitHub Packages requires organization/user in the URL path:
+    #   - Kubernetes: Automatically templated from github.required_org
+    #   - Docker: Manually replace YOUR_ORG in configuration.shared.json
+    #
+    # When resolving dependencies, Reposilite:
+    #   1. Checks local "maven" repository storage
+    #   2. If not found, cascades through mirrored repositories
+    #   3. Caches successful resolutions locally
+    #
+    # Maven client configuration (single repository URL):
+    #   <distributionManagement>
+    #     <repository>
+    #       <id>artifusion</id>
+    #       <url>http://localhost:8080/maven</url>
+    #     </repository>
+    #     <snapshotRepository>
+    #       <id>artifusion-snapshots</id>
+    #       <url>http://localhost:8080/maven</url>
+    #     </snapshotRepository>
+    #   </distributionManagement>
+    #
+    #   <repositories>
+    #     <repository>
+    #       <id>artifusion</id>
+    #       <url>http://localhost:8080/maven</url>
+    #       <snapshots><enabled>true</enabled></snapshots>
+    #       <releases><enabled>true</enabled></releases>
+    #     </repository>
+    #   </repositories>
+    #
+    # Backend: Reposilite Maven Repository Manager
+    # URL must include the repository name (/maven) since path_prefix is stripped
+    backend:
+      name: reposilite
+      url: http://reposilite:8080/maven
+
+      # Optional: Backend authentication (if backend requires credentials)
+      # Uncomment and configure if your Reposilite instance requires authentication
+      # auth:
+      #   type: basic          # Auth types: basic, bearer, header
+      #   username: admin
+      #   password: admin123
+      #   # Alternatively, for bearer token:
+      #   # type: bearer
+      #   # token: your-bearer-token
+      #   # Or for custom header:
+      #   # type: header
+      #   # header_name: X-API-Key
+      #   # header_value: your-api-key
+
+      max_idle_conns: 200
+      max_idle_conns_per_host: 100
+      idle_conn_timeout: 90s
+      dial_timeout: 10s
+      request_timeout: 300s
+
+  # ===== NPM Registry Protocol =====
+  npm:
+    enabled: true
+
+    # Host-based routing (optional)
+    # Set to domain name (e.g., "npm.example.com") for domain-based routing
+    # Leave empty for path-based routing (shared domain)
+    # When set, only requests to this host will be routed to NPM handler
+    host: ""
+
+    # Path prefix for NPM requests
+    # REQUIRED when host is empty (path-based routing)
+    # Optional when host is set (can be "" for root path)
+    # Backend sees requests without this prefix
+    # Example with prefix: /npm/@scope/package -> /@scope/package
+    path_prefix: /npm
+
+    client_auth:
+      supported_schemes: [bearer]
+      realm: "Artifusion NPM Registry"
+
+    # Backend: Verdaccio NPM Registry
+    backend:
+      name: verdaccio
+      url: http://verdaccio:4873
+
+      # Optional: Backend authentication (if backend requires credentials)
+      # Uncomment and configure if your Verdaccio instance requires authentication
+      # auth:
+      #   type: basic          # Auth types: basic, bearer, header
+      #   username: npm-user
+      #   password: npm-password
+      max_idle_conns: 200
+      max_idle_conns_per_host: 100
+      idle_conn_timeout: 90s
+      dial_timeout: 10s
+      request_timeout: 300s
+
+# ===== Logging =====
+logging:
+  # Log level: debug, info, warn, error
+  # Override with: ARTIFUSION_LOGGING_LEVEL
+  level: info
+
+  # Log format:
+  #   console (default) - Colorful, human-readable logs with auto-detected TTY support
+  #                     - Colors automatically disabled when piped to files or non-TTY outputs
+  #                     - Best for development and production monitoring
+  #                     - Example: [15:04:05.000] | INF | Server starting  port=8080
+  #
+  #   json            - Structured JSON logs for log aggregation systems
+  #                     - Use with ELK Stack, Splunk, CloudWatch, Datadog, etc.
+  #                     - Example: {"level":"info","time":"2025-10-18T15:04:05Z","message":"Server starting","port":8080}
+  #
+  # Override with: ARTIFUSION_LOGGING_FORMAT
+  format: console
+
+  # Force colored output even when TTY is not detected
+  # Useful for environments like Docker/Kubernetes where TTY auto-detection may fail
+  # Only applies when format is "console"
+  # Override with: ARTIFUSION_LOGGING_FORCE_COLOR
+  force_color: false
+
+  # Debug options
+  include_headers: false  # Include HTTP headers in logs
+  include_body: false     # Include request/response bodies (WARNING: may log sensitive data)
+
+# ===== Metrics (Prometheus) =====
+metrics:
+  enabled: true
+  path: /metrics
+
+# ===== Health Checks =====
+health:
+  livenessPath: /health
+  readinessPath: /ready
+  checkTimeout: 5s

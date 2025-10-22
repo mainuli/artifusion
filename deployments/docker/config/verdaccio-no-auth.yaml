@@ -1,0 +1,121 @@
+# Verdaccio NPM Registry Configuration (No Authentication)
+# Documentation: https://verdaccio.org/docs/configuration
+
+# ===== Storage =====
+storage: /verdaccio/storage
+
+# ===== Authentication =====
+# No authentication - all access allowed, protected by Artifusion
+auth:
+  htpasswd:
+    file: /verdaccio/storage/htpasswd
+    # Allow unlimited users
+    max_users: -1
+    algorithm: bcrypt
+    rounds: 10
+
+# ===== Uplinks (Mirror Configuration) =====
+# Configure upstream registries for proxying packages
+uplinks:
+  # GitHub Packages NPM registry
+  github:
+    url: https://npm.pkg.github.com/
+    timeout: 30s
+    max_age: 30m
+    fail_timeout: 5m
+    maxage: 30m
+    headers:
+      Accept: "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*"
+    agent_options:
+      keepAlive: true
+      maxSockets: 40
+      maxFreeSockets: 10
+
+  # Official npmjs.org registry (main public registry)
+  npmjs:
+    url: https://registry.npmjs.org/
+    timeout: 30s
+    max_age: 2h
+    fail_timeout: 10m
+    maxage: 2h
+    headers:
+      Accept: "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*"
+    agent_options:
+      keepAlive: true
+      maxSockets: 100
+      maxFreeSockets: 10
+
+# ===== Packages Configuration =====
+# Define package access rules and upstream routing
+packages:
+  # Scoped packages from GitHub (e.g., @myorg/package)
+  '@*/*':
+    # Allow all operations - no authentication required
+    access: $all
+    publish: $all
+    unpublish: $all
+    proxy: github npmjs
+
+  # Private/hosted packages (published to this registry)
+  'private-*':
+    access: $all
+    publish: $all
+    unpublish: $all
+
+  # All other packages (public packages)
+  '**':
+    access: $all
+    publish: $all
+    unpublish: $all
+    proxy: npmjs github
+
+# ===== Server Configuration =====
+server:
+  keepAliveTimeout: 60
+
+# ===== Web UI Configuration =====
+web:
+  enable: true
+  title: Artifusion NPM Registry (No Auth)
+  gravatar: false
+  scope: ''
+
+# ===== Middleware Configuration =====
+middlewares:
+  audit:
+    enabled: true
+
+# ===== Logs Configuration =====
+logs:
+  type: stdout
+  format: pretty
+  level: info
+
+# ===== Security Configuration =====
+security:
+  api:
+    jwt:
+      sign:
+        expiresIn: 7d
+      verify:
+        someProp: [value]
+
+# ===== Notifications Configuration =====
+notify:
+  method: POST
+  headers: [{'Content-Type': 'application/json'}]
+  endpoint: http://artifusion:8080/npm-webhook
+  content: '{"name": "{{name}}", "version": "{{version}}", "tag": "{{tag}}"}'
+
+# ===== Listen Configuration =====
+listen:
+  - 0.0.0.0:4873
+
+# ===== Max Body Size =====
+max_body_size: 100mb
+
+# ===== Experiments =====
+experiments:
+  search: true
+  # Disable token authentication
+  token: false

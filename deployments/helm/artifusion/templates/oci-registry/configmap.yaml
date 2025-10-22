@@ -1,0 +1,17 @@
+{{- if .Values.ociRegistry.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "artifusion.ociRegistry.serviceName" . }}
+  labels:
+    {{- include "artifusion.ociRegistry.labels" . | nindent 4 }}
+data:
+  oci-registry-upstream.yaml: |
+    {{- range .Values.ociRegistry.upstreams }}
+    - namespace: {{ .namespace | quote }}
+      host: {{ .host | quote }}
+      tls: {{ .tls }}
+      manifest_invalidation_time: {{ .manifest_invalidation_time }}
+      blob_invalidation_time: {{ .blob_invalidation_time }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,408 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0, v2.1.3, etc.
+
+# Prevent concurrent releases to avoid race conditions
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false  # Don't cancel in-progress releases
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}  # e.g., mainuli/artifusion
+  HELM_CHART_NAME: artifusion
+
+permissions:
+  contents: write          # Required for creating releases
+  packages: write          # Required for pushing to ghcr.io
+  id-token: write          # Required for SLSA provenance and Cosign signing
+  security-events: write   # Required for uploading Trivy scan results
+
+jobs:
+  # Job 1: Run tests before building anything
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run tests with race detection
+        run: make test
+
+      - name: Upload coverage report
+        if: always()  # Upload even if tests fail for debugging
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.txt
+          retention-days: 90
+
+  # Job 2: Build and push multi-arch Docker image
+  build-and-push-image:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: test  # Only run if tests pass
+    # Manual approval gate via GitHub Environment (configure in repo settings)
+    environment:
+      name: production
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+    outputs:
+      version: ${{ steps.version.outputs.version_without_v }}
+      image_digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # Full history for git describe
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION_WITHOUT_V=${VERSION#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "version_without_v=${VERSION_WITHOUT_V}" >> $GITHUB_OUTPUT
+          echo "git_commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "build_time=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            GIT_COMMIT=${{ steps.version.outputs.git_commit }}
+            BUILD_TIME=${{ steps.version.outputs.build_time }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true  # Enable SLSA provenance attestation
+          sbom: false  # Generate SBOM separately with more control
+
+      # Scan image for vulnerabilities (fail on HIGH or CRITICAL)
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'  # Fail workflow on vulnerabilities
+
+      - name: Upload Trivy results to GitHub Security
+        if: always()  # Upload even if scan fails
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      # Install Cosign for image signing
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.7.0
+
+      # Sign the container image with keyless signing
+      - name: Sign container image
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+
+      # Generate SBOM from the built image digest (not by pulling)
+      - name: Generate SBOM
+        continue-on-error: true  # Don't fail release if SBOM generation fails
+        uses: anchore/sbom-action@v0.17.2
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          artifact-name: sbom-${{ steps.version.outputs.version_without_v }}.spdx.json
+          output-file: sbom-${{ steps.version.outputs.version_without_v }}.spdx.json
+
+      - name: Upload SBOM
+        if: always()  # Upload even if SBOM generation had issues
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom-${{ steps.version.outputs.version_without_v }}.spdx.json
+          retention-days: 90
+          if-no-files-found: warn
+
+  # Job 3: Lint, package, and publish Helm chart
+  publish-helm-chart:
+    name: Publish Helm Chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: test  # Only run if tests pass
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4.3.0
+        with:
+          version: 'latest'
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION_WITHOUT_V=${VERSION#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "version_without_v=${VERSION_WITHOUT_V}" >> $GITHUB_OUTPUT
+
+      - name: Update Chart.yaml version
+        run: |
+          CHART_VERSION=${{ steps.version.outputs.version_without_v }}
+          APP_VERSION=${{ steps.version.outputs.version_without_v }}
+
+          sed -i "s/^version:.*/version: ${CHART_VERSION}/" deployments/helm/artifusion/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${APP_VERSION}\"/" deployments/helm/artifusion/Chart.yaml
+
+          echo "Updated Chart.yaml:"
+          cat deployments/helm/artifusion/Chart.yaml
+
+      - name: Lint Helm chart
+        run: helm lint deployments/helm/artifusion --strict
+
+      - name: Package Helm chart
+        run: |
+          mkdir -p dist
+          helm package deployments/helm/artifusion \
+            --version ${{ steps.version.outputs.version_without_v }} \
+            --app-version ${{ steps.version.outputs.version_without_v }} \
+            --destination ./dist
+
+      - name: Log in to GitHub Container Registry (Helm)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      # Push with retry logic for transient failures
+      - name: Push Helm chart to GHCR
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            helm push ./dist/${{ env.HELM_CHART_NAME }}-${{ steps.version.outputs.version_without_v }}.tgz \
+              oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
+
+      - name: Upload Helm chart artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: ./dist/${{ env.HELM_CHART_NAME }}-${{ steps.version.outputs.version_without_v }}.tgz
+          retention-days: 90
+
+  # Job 4: Create GitHub Release
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [build-and-push-image, publish-helm-chart]  # Wait for both artifacts
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION_WITHOUT_V=${VERSION#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "version_without_v=${VERSION_WITHOUT_V}" >> $GITHUB_OUTPUT
+
+      - name: Download Helm chart artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: helm-chart
+          path: ./dist
+
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: ./dist
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          IMAGE_DIGEST=${{ needs.build-and-push-image.outputs.image_digest }}
+
+          cat > release_notes.md << 'EOF'
+          ## Artifusion ${{ steps.version.outputs.version }}
+
+          ### Docker Image
+
+          Multi-arch support (amd64, arm64), signed with Cosign, and scanned for vulnerabilities:
+          ```bash
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version_without_v }}
+          ```
+
+          **Image Digest**: `${IMAGE_DIGEST}`
+
+          **Verify signature** (requires Cosign):
+          ```bash
+          cosign verify ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${IMAGE_DIGEST} \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp="^https://github.com/${{ github.repository }}/"
+          ```
+
+          ### Helm Chart
+
+          Install via OCI registry:
+          ```bash
+          helm install artifusion oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/artifusion \
+            --version ${{ steps.version.outputs.version_without_v }} \
+            --namespace artifusion --create-namespace
+          ```
+
+          Or download the chart:
+          ```bash
+          helm pull oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/artifusion \
+            --version ${{ steps.version.outputs.version_without_v }}
+          ```
+
+          ### Security
+
+          - ✅ Image scanned with Trivy (no HIGH/CRITICAL vulnerabilities)
+          - ✅ Signed with Sigstore Cosign (keyless signing)
+          - ✅ SLSA Build Level 3 provenance attestation included
+          - ✅ SBOM (Software Bill of Materials) included
+
+          ### What's Changed
+
+          EOF
+
+          # Get commits since last tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 ${{ steps.version.outputs.version }}^ 2>/dev/null || echo "")
+          if [ -n "$PREVIOUS_TAG" ]; then
+            git log ${PREVIOUS_TAG}..${{ steps.version.outputs.version }} --pretty=format:"- %s (%h)" >> release_notes.md
+          else
+            git log ${{ steps.version.outputs.version }} --pretty=format:"- %s (%h)" >> release_notes.md
+          fi
+
+          echo "" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Artifacts" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "- Docker image: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version_without_v }}\`" >> release_notes.md
+          echo "- Image digest: \`${IMAGE_DIGEST}\`" >> release_notes.md
+          echo "- Helm chart: \`oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/artifusion:${{ steps.version.outputs.version_without_v }}\`" >> release_notes.md
+          echo "- SBOM: See attached \`sbom-${{ steps.version.outputs.version_without_v }}.spdx.json\`" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Rollback" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "If you need to rollback this release:" >> release_notes.md
+          echo "1. Delete the GitHub release and git tag" >> release_notes.md
+          echo "2. Delete image tags from ghcr.io (via GitHub Packages UI)" >> release_notes.md
+          echo "3. Delete Helm chart version from ghcr.io (via GitHub Packages UI)" >> release_notes.md
+          echo "4. Run \`helm rollback <release-name>\` on affected clusters" >> release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ steps.version.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          files: |
+            ./dist/${{ env.HELM_CHART_NAME }}-${{ steps.version.outputs.version_without_v }}.tgz
+            ./dist/sbom-${{ steps.version.outputs.version_without_v }}.spdx.json
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Job 5: Notify on failure (optional - configure Slack webhook in repo secrets)
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [test, build-and-push-image, publish-helm-chart, create-release]
+    if: failure()  # Only run if any job fails
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      # Placeholder for Slack notification (uncomment and configure SLACK_WEBHOOK_URL secret)
+      # - name: Send Slack notification
+      #   uses: slackapi/slack-github-action@v1.26.0
+      #   with:
+      #     payload: |
+      #       {
+      #         "text": "❌ Release ${{ steps.version.outputs.version }} failed",
+      #         "blocks": [
+      #           {
+      #             "type": "section",
+      #             "text": {
+      #               "type": "mrkdwn",
+      #               "text": "❌ *Release Failed*\n*Version:* ${{ steps.version.outputs.version }}\n*Repository:* ${{ github.repository }}\n*Triggered by:* ${{ github.actor }}\n*Workflow:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+      #             }
+      #           }
+      #         ]
+      #       }
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      #     SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Create GitHub issue on failure
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = '${{ steps.version.outputs.version }}';
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Release ${version} failed`,
+              body: `## Release Failure\n\n**Version:** ${version}\n**Triggered by:** ${{ github.actor }}\n**Workflow run:** ${runUrl}\n\nThe release workflow failed. Please check the workflow logs for details.`,
+              labels: ['release-failure', 'automated']
+            });

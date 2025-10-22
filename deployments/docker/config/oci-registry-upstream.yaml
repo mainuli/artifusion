@@ -1,0 +1,75 @@
+# mcronce/oci-registry upstream configuration
+# Routes namespaced requests to appropriate upstream registries
+#
+# How it works:
+# - Request: GET /v2/ghcr.io/myorg/image/manifests/latest
+# - oci-registry extracts namespace: "ghcr.io"
+# - Looks up upstream with matching namespace
+# - Forwards: GET https://ghcr.io/v2/myorg/image/manifests/latest
+# - Caches response based on invalidation times
+#
+# Note: Local hosted registry (registry:5000) is accessed directly by Artifusion,
+# not through oci-registry, to avoid authentication issues.
+
+# ===== GitHub Container Registry =====
+# Cache public and authenticated private repos
+- namespace: ghcr.io
+  host: ghcr.io
+  tls: true
+  accept_invalid_certs: false
+  # Cache manifests and blobs for 14 days
+  manifest_invalidation_time: 336h
+  blob_invalidation_time: 336h
+  # Optional: Add credentials via $UPSTREAM_CREDENTIALS for private repos
+  # username: github-user
+  # password: ghp_xxxxxxxxxxxx
+
+# ===== Docker Hub =====
+# Official images and public repos
+- namespace: docker.io
+  host: registry-1.docker.io
+  tls: true
+  accept_invalid_certs: false
+  # Cache for 14 days
+  manifest_invalidation_time: 336h
+  blob_invalidation_time: 336h
+  # Optional: Add credentials for higher rate limits
+  # username: dockerhub-user
+  # password: dckr_pat_xxxxxxxxxxxx
+
+# ===== Quay.io =====
+# Red Hat's container registry
+- namespace: quay.io
+  host: quay.io
+  tls: true
+  accept_invalid_certs: false
+  # Cache for 14 days
+  manifest_invalidation_time: 336h
+  blob_invalidation_time: 336h
+
+# ===== Add more upstreams as needed =====
+# Examples:
+#
+# - namespace: gcr.io
+#   host: gcr.io
+#   tls: true
+#   manifest_invalidation_time: 336h
+#   blob_invalidation_time: 336h
+#
+# - namespace: k8s.gcr.io
+#   host: k8s.gcr.io
+#   tls: true
+#   manifest_invalidation_time: 336h
+#   blob_invalidation_time: 336h
+#
+# - namespace: registry.k8s.io
+#   host: registry.k8s.io
+#   tls: true
+#   manifest_invalidation_time: 336h
+#   blob_invalidation_time: 336h
+
+# Notes:
+# - Credentials can be provided via $UPSTREAM_CREDENTIALS env var (recommended)
+# - Example: UPSTREAM_CREDENTIALS='{"ghcr.io":{"username":"user","password":"token"}}'
+# - invalidation_time: 0s = no cache, always fetch fresh
+# - invalidation_time: 336h = cache for 14 days
