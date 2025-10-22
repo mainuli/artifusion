@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
@@ -8,407 +8,185 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Architecture**: Middleware-based HTTP proxy with protocol detection chain and fault-tolerant backend routing.
 
-**Status**: Production Ready (Grade A) - 112 tests, zero critical issues, comprehensive metrics.
+**Status**: Production Ready - 112 tests, zero critical issues, comprehensive metrics.
 
-## Build and Development Commands
-
-### Essential Commands
+## Quick Start
 
 ```bash
-# Build binary with version injection (creates bin/artifusion)
-make build
+# Build and test
+make build         # Build binary (creates bin/artifusion)
+make test          # Run all tests with race detection
+make lint          # Run linters
+make ci            # Run complete CI pipeline (lint + test + build)
 
-# Run all tests with race detection
-make test
-
-# Generate HTML coverage report
-make test-coverage
-# View: open coverage.html
-
-# Run linters (go vet, go fmt check)
-make lint
-
-# Format code
-make fmt
-
-# Clean build artifacts
-make clean
-```
-
-### Running Locally
-
-```bash
-# Copy example configuration
+# Run locally
 cp config/config.example.yaml config/config.yaml
-# Edit config.yaml with your settings (GitHub org, backend URLs, etc.)
-
-# Run with local config
 make run
 
-# Or run in development mode
-make run-dev
-```
-
-### Docker Commands
-
-```bash
-# Build Docker image (multi-stage, Chainguard-based)
+# Docker
 make docker-build
+cd deployments/docker && docker-compose up -d
 
-# Start all services (Artifusion + backends: Verdaccio, Reposilite, Registry)
-cd deployments/docker
-docker-compose up -d
-
-# Check health
+# Health checks
 curl http://localhost:8080/health
 curl http://localhost:8080/metrics
-
-# View logs
-docker-compose logs -f artifusion
-
-# Stop services
-docker-compose down
 ```
 
-### Testing Specific Packages
-
-```bash
-# Test specific package
-go test -v ./internal/auth/...
-go test -v ./internal/middleware/...
-go test -v ./internal/handler/oci/...
-
-# Test with coverage for specific package
-go test -v -cover ./internal/auth/...
-
-# Run benchmarks
-make bench
-```
-
-### CI/Complete Build Pipeline
-
-```bash
-# Run complete CI pipeline (lint + test + build)
-make ci
-
-# Run all checks and build
-make all
-```
-
-## High-Level Architecture
+## Architecture
 
 ### Request Flow
 
 ```
 Client Request
     ↓
-[Middleware Stack - 7 layers in order]
-  1. RequestID          - Generate unique request ID
-  2. SecurityHeaders    - Add 8 security headers (HSTS, CSP, etc.)
-  3. Recovery           - Panic recovery with stack traces
-  4. Logging            - Structured request/response logging (zerolog)
-  5. Timeout            - Request timeout enforcement (configurable)
-  6. ConcurrencyLimiter - Max concurrent request limiting (semaphore)
-  7. RateLimiter        - Global + per-user rate limiting (token bucket)
+[Middleware Stack]
+  RequestID → SecurityHeaders → Recovery → Logging →
+  Timeout → ConcurrencyLimiter → RateLimiter
     ↓
-[Protocol Detection Chain]
-  - OCI/Docker Registry v2 (host or path-based detection)
-  - Maven Repository (host or path-based detection)
-  - NPM Registry (host or path-based detection)
+[Protocol Detection]
+  OCI/Docker, Maven, NPM (host or path-based)
     ↓
-[Protocol Handler - per protocol]
-  - Client Authentication (GitHub PAT validation)
-  - Path/Namespace Rewriting
-  - Backend Selection (cascading for OCI, single for Maven/NPM)
-  - Circuit Breaker Execution (per-backend fault isolation)
-  - Async Proxying with Connection Pooling
-  - Response Rewriting (Location, WWW-Authenticate headers)
+[Protocol Handler]
+  GitHub PAT Auth → Backend Routing → Circuit Breaker →
+  Proxying → Response Rewriting
     ↓
 [Upstream Backends]
-  - OCI: GHCR, Docker Hub, Quay, local registry (cascading)
-  - Maven: Reposilite 3 (unified repository with mirrored upstreams: GitHub Packages, Maven Central, JasperReports, Spring, Sonatype Snapshots, Gradle)
-  - NPM: Verdaccio (caches npmjs.org)
+  OCI: GHCR, Docker Hub, local registry (cascading)
+  Maven: Reposilite 3 (GitHub Packages, Maven Central, etc.)
+  NPM: Verdaccio (npmjs.org cache)
 ```
 
-### Key Architectural Patterns
+### Key Patterns
 
-1. **Shared Authentication Layer** (`internal/auth/client_auth.go`)
-   - All protocol handlers use common GitHub PAT validation
-   - SHA256-hashed token caching (5min TTL, never stores plaintext)
-   - Singleflight pattern prevents thundering herd on cache misses
-   - Supports PATs (`ghp_*`), fine-grained PATs (`github_pat_*`), and GitHub Actions tokens (`ghs_*`)
+1. **Shared Authentication** (`internal/auth/client_auth.go`)
+   - GitHub PAT validation with SHA256-hashed token caching (5min TTL)
+   - Singleflight pattern prevents thundering herd
+   - Supports `ghp_*`, `github_pat_*`, and `ghs_*` tokens
 
 2. **Shared Proxy Client** (`internal/proxy/client.go`)
    - Connection pooling (200 idle connections per host)
-   - Integrated circuit breakers (per-backend fault tolerance)
-   - Comprehensive metrics recording (latency histograms, error counters)
-   - Timeout handling with context propagation
+   - Per-backend circuit breakers
+   - Comprehensive metrics recording
 
-3. **Protocol Detection Chain** (`internal/detector/`)
+3. **Protocol Detection** (`internal/detector/`)
    - Chain of Responsibility pattern
-   - Supports both host-based and path-based routing
-   - OCI: Detects by host match OR path prefix
-   - Maven/NPM: Detects by path prefix (e.g., `/maven/`, `/npm/`)
+   - Host-based and path-based routing
 
 4. **Response Rewriting** (`internal/handler/*/rewriter.go`)
-   - Rewrites backend URLs to public-facing URLs
+   - Rewrites backend URLs to public URLs
    - Handles `Location` and `WWW-Authenticate` headers
-   - Public URL detection from `X-Forwarded-Host`, `X-Forwarded-Proto`, `Forwarded` headers
-   - Critical for reverse proxy deployments
 
 ## Code Organization
 
-### Package Structure
-
 ```
 internal/
-├── auth/                # GitHub authentication (8 files)
-│   ├── client_auth.go   # SHARED auth layer used by all handlers
-│   ├── github.go        # GitHub API client
-│   ├── token_validator.go
-│   └── cache.go         # SHA256-hashed token cache with TTL
-│
-├── config/              # Configuration management (4 files)
-│   ├── config.go        # Config struct definitions
-│   ├── loader.go        # YAML loading with Viper
-│   └── validation.go    # Config validation rules
-│
-├── detector/            # Protocol detection (5 files)
-│   ├── detector.go      # Chain pattern implementation
-│   ├── oci.go          # Host/path-based OCI detection
-│   ├── maven.go        # Maven detection
-│   └── npm.go          # NPM detection
-│
-├── handler/             # Protocol handlers (20 files)
-│   ├── handler.go       # Handler interface
-│   ├── oci/            # Docker Registry v2 (6 files)
-│   │   ├── handler.go   # Main handler
-│   │   ├── routes.go    # Route definitions
-│   │   ├── auth.go      # Authentication logic
-│   │   ├── proxy.go     # Backend cascading and proxying
-│   │   └── rewriter.go  # Response URL rewriting
-│   ├── maven/          # Maven repository (6 files)
-│   │   └── [same structure as oci/]
-│   └── npm/            # NPM registry (6 files)
-│       └── [same structure as oci/]
-│
-├── middleware/          # HTTP middleware (10 files)
-│   ├── requestid.go     # Request ID generation
-│   ├── security.go      # 8 security headers
-│   ├── recovery.go      # Panic recovery
-│   ├── logging.go       # Structured logging
-│   ├── timeout.go       # Request timeout
-│   ├── concurrency.go   # Concurrency limiter
-│   └── ratelimit.go     # Rate limiting (global + per-user)
-│
-├── proxy/               # Shared proxy client (4 files)
-│   ├── client.go        # SHARED HTTP client with pooling
-│   ├── circuit_breaker.go # Per-backend circuit breakers
-│   └── rewriter/
-│       └── rewriter.go  # URL rewriting utilities
-│
+├── auth/                # GitHub PAT authentication
+│   └── client_auth.go   # SHARED by all handlers
+├── config/              # Configuration management (Viper)
+├── detector/            # Protocol detection chain
+├── handler/             # Protocol handlers
+│   ├── oci/            # Docker Registry v2
+│   ├── maven/          # Maven repository
+│   └── npm/            # NPM registry
+├── middleware/          # HTTP middleware (7 layers)
+├── proxy/               # Shared HTTP client with circuit breakers
+│   └── client.go        # SHARED by all handlers
 ├── metrics/             # Prometheus metrics
-│   └── metrics.go       # 15+ metric definitions
-│
-├── health/              # Health checks
-│   └── health.go        # Liveness/readiness endpoints
-│
-├── logging/             # Logging setup
-│   └── setup.go         # Zerolog configuration
-│
-├── errors/              # Error handling
-│   └── errors.go        # Structured error types
-│
-├── constants/           # Shared constants
-│   └── timeouts.go      # Default timeout values
-│
-└── utils/               # Utilities
-    └── url.go           # URL manipulation helpers
+└── health/              # Health check endpoints
 ```
 
-### Important File Relationships
-
-- **All protocol handlers** (`internal/handler/*/handler.go`) use:
-  - `internal/auth/client_auth.go` for authentication
-  - `internal/proxy/client.go` for proxying to backends
-  - Their own `rewriter.go` for protocol-specific response rewriting
-
-- **Middleware chain** is defined in `cmd/artifusion/main.go` in specific order (RequestID → Security → Recovery → Logging → Timeout → Concurrency → RateLimit)
-
-- **Configuration** flows from `config/config.yaml` → `internal/config/loader.go` → validation → distributed to all handlers/middleware
+**Important relationships**:
+- All handlers use `internal/auth/client_auth.go` for authentication
+- All handlers use `internal/proxy/client.go` for backend proxying
+- Middleware chain defined in `cmd/artifusion/main.go` (order matters!)
 
 ## Configuration
 
-### Two Routing Models
+### Routing Models
 
-Artifusion supports two deployment models controlled by configuration:
-
-**Model 1: Host-based routing** (different domains per protocol)
+**Host-based** (different domains per protocol):
 ```yaml
 protocols:
   oci:
-    host: "docker.example.com"  # Set host for OCI routing
-    # Note: OCI always uses /v2 path per OCI Distribution Spec (not configurable)
+    host: "docker.example.com"  # OCI always uses /v2 path (not configurable)
   maven:
     host: "maven.example.com"
-    path_prefix: ""
 ```
 
-**Model 2: Path-based routing** (shared domain, different paths)
+**Path-based** (shared domain):
 ```yaml
 protocols:
   oci:
-    host: ""               # Leave empty for path-based
-    # Note: OCI always uses /v2 path per OCI Distribution Spec (not configurable)
+    host: ""  # OCI always uses /v2 path (not configurable)
   maven:
     host: ""
     path_prefix: "/maven"  # REQUIRED when host is empty
 ```
 
-**Important**: Unlike Maven and NPM, the OCI protocol does **not** support custom `path_prefix` configuration. The OCI Distribution Specification mandates that all API requests use the `/v2` endpoint. Only the `host` field can be configured for host-based routing.
+**Important**: OCI protocol does NOT support custom `path_prefix` - it always uses `/v2` per OCI Distribution Spec.
 
-### Critical Configuration Fields
+### Key Configuration Fields
 
 ```yaml
 github:
-  required_org: "myorg"        # Optional - leave empty to allow any valid GitHub user
-  required_teams: []           # Optional - only checked if required_org is set
+  required_org: "myorg"        # Optional - leave empty to allow any GitHub user
   auth_cache_ttl: 30m          # Reduces GitHub API calls by ~99%
 
 server:
-  max_concurrent_requests: 10000  # Semaphore limit
+  max_concurrent_requests: 10000
 
 rate_limit:
-  requests_per_sec: 1000.0     # Global rate limit
-  per_user_requests: 100.0     # Per-user rate limit
+  requests_per_sec: 1000.0     # Global
+  per_user_requests: 100.0     # Per-user
 ```
 
-### Environment Variable Overrides
+### Environment Variables
 
-Viper is configured with prefix `ARTIFUSION` and automatic environment variable binding. Dots in config keys are replaced with underscores.
-
-**Special environment variables** (handled directly in main.go):
-- `CONFIG_PATH` - Path to config.yaml (no prefix, default: looks in /etc/artifusion, ~/.artifusion, ./config, .)
-- `ARTIFUSION_LOGGING_LEVEL` - Initial log level before config loads (debug, info, warn, error)
-- `ARTIFUSION_LOGGING_FORMAT` - Initial log format before config loads (console, json)
-- `ARTIFUSION_LOGGING_FORCE_COLOR` - Force colored output even when TTY is not detected (true, false)
-
-**Config overrides** (via Viper's AutomaticEnv):
-Any config field can be overridden with pattern: `ARTIFUSION_<SECTION>_<KEY>` where:
-- All dots (`.`) in config paths are replaced with underscores (`_`)
-- All keys are uppercased
-- Existing underscores in config keys are preserved
+All config fields can be overridden with pattern: `ARTIFUSION_<SECTION>_<KEY>`
 
 Examples:
-- `ARTIFUSION_GITHUB_REQUIRED_ORG` overrides `github.required_org`
-- `ARTIFUSION_GITHUB_API_URL` overrides `github.api_url`
-- `ARTIFUSION_GITHUB_AUTH_CACHE_TTL` overrides `github.auth_cache_ttl`
-- `ARTIFUSION_SERVER_PORT` overrides `server.port`
-- `ARTIFUSION_SERVER_MAX_CONCURRENT_REQUESTS` overrides `server.max_concurrent_requests`
-- `ARTIFUSION_RATE_LIMIT_ENABLED` overrides `rate_limit.enabled`
-- `ARTIFUSION_RATE_LIMIT_REQUESTS_PER_SEC` overrides `rate_limit.requests_per_sec`
-- `ARTIFUSION_METRICS_ENABLED` overrides `metrics.enabled`
-- `ARTIFUSION_PROTOCOLS_OCI_ENABLED` overrides `protocols.oci.enabled`
+- `ARTIFUSION_GITHUB_REQUIRED_ORG` → `github.required_org`
+- `ARTIFUSION_SERVER_PORT` → `server.port`
+- `ARTIFUSION_METRICS_ENABLED` → `metrics.enabled`
 
-Note: Environment variables take precedence over config file values.
-
-## Testing Philosophy
-
-### Test Coverage
-
-- **112 total tests** across 14 test files
-- **Race detection enabled** for all tests (`-race` flag)
-- **Table-driven tests** for comprehensive scenario coverage
-- **No external test frameworks** - uses standard Go `testing` package only
-
-### Running Tests
-
-```bash
-# All tests with race detection
-make test
-
-# Specific package tests
-go test -v ./internal/auth/...
-go test -v ./internal/middleware/...
-go test -v ./internal/handler/oci/...
-
-# Test coverage report
-make test-coverage
-open coverage.html
-
-# CI pipeline (lint + test + build)
-make ci
-```
-
-### Key Test Files
-
-- `internal/auth/*_test.go` - Token validation, caching, GitHub API mocking
-- `internal/config/validation_test.go` - All 44 config validation scenarios
-- `internal/handler/oci/rewriter_test.go` - 41 URL rewriting test cases
-- `internal/middleware/*_test.go` - Middleware behavior (timeout, rate limiting, etc.)
-- `internal/proxy/client_test.go` - Circuit breaker and proxy client tests
+Special variables (handled in main.go):
+- `CONFIG_PATH` - Path to config.yaml
+- `ARTIFUSION_LOGGING_LEVEL` - Log level (debug, info, warn, error)
+- `ARTIFUSION_LOGGING_FORMAT` - Format (console, json)
 
 ## Critical Implementation Details
 
 ### Authentication Flow
 
 1. Client provides GitHub PAT via Basic Auth or Bearer token
-2. Token format validated via regex (blocks invalid tokens before GitHub API calls)
+2. Token format validated via regex
 3. Token hashed with SHA256 for cache lookup
 4. On cache miss: GitHub API validates token + org/team membership
-5. Result cached for 5 minutes (configurable via `auth_cache_ttl`)
-6. Singleflight prevents duplicate GitHub API calls during cache miss
+5. Result cached for 5 minutes
+6. Singleflight prevents duplicate API calls
 
 **IMPORTANT**: Never store tokens in plaintext. Always use `internal/auth/cache.go` which stores SHA256 hashes only.
 
 ### Circuit Breaker Pattern
 
-- **Per-backend circuit breakers** (`internal/proxy/circuit_breaker.go`)
+- Per-backend circuit breakers in `internal/proxy/circuit_breaker.go`
 - Uses `github.com/sony/gobreaker` library
-- States: Closed (normal) → Open (failing) → Half-Open (testing recovery)
-- Metrics: `artifusion_circuit_breaker_state` (0=closed, 1=open, 2=half-open)
-- Auto-recovery after timeout period
-
-**When modifying backend calls**: Always wrap in circuit breaker execution via `proxy.Client.ProxyRequestWithCircuitBreaker()`.
+- States: Closed (normal) → Open (failing) → Half-Open (testing)
+- Always wrap backend calls in circuit breaker via `proxy.Client.ProxyRequestWithCircuitBreaker()`
 
 ### OCI Cascading Backends
 
 OCI pull requests cascade through backends in priority order:
 1. Check local registry first
-2. If 404, try next backend (GHCR)
-3. Continue cascading until success or all backends exhausted
-4. Return 404 only if all backends fail
+2. If 404, try next backend
+3. Continue until success or all exhausted
 
-**Code location**: `internal/handler/oci/proxy.go` - `cascadePullRequest()` function
-
-### Response Rewriting
-
-All protocol handlers rewrite backend responses to use public-facing URLs:
-
-```go
-// Example: Backend returns Location: http://registry:5000/v2/myimage/blobs/sha256:abc123
-// Rewritten to:          Location: https://docker.example.com/v2/myimage/blobs/sha256:abc123
-```
-
-**Public URL detection order**:
-1. Protocol's configured `publicURL` field (if set)
-2. `X-Forwarded-Host` + `X-Forwarded-Proto` headers
-3. `Forwarded` header (RFC 7239)
-4. Fallback to request URL
-
-**Code location**: Each protocol handler has `rewriter.go` with protocol-specific logic.
+**Code location**: `internal/handler/oci/proxy.go:cascadePullRequest()`
 
 ### Logging Standards
 
-- Uses `github.com/rs/zerolog` for structured logging
-- **Console format** (default): Human-readable with auto TTY detection
-  - Colors automatically enabled/disabled based on TTY detection
-  - Use `force_color: true` to force colors in Docker/Kubernetes environments
-- **JSON format**: For log aggregation systems (ELK, Splunk, etc.)
-- Always include `requestID` field for request correlation
-- Log levels: DEBUG (internal details) → INFO (normal ops) → WARN (degraded) → ERROR (failures)
+Use `github.com/rs/zerolog` for structured logging:
 
-**When adding logs**:
 ```go
 log.Info().
     Str("requestID", requestID).
@@ -417,12 +195,13 @@ log.Info().
     Msg("Proxying to backend")
 ```
 
-### Metrics Recording
+Always include `requestID` for request correlation.
 
-All backend interactions must record metrics:
+### Metrics
+
+Record metrics for all backend calls:
 
 ```go
-// Required metrics for all backend calls:
 metrics.RecordBackendLatency(backendName, method, duration)
 metrics.RecordBackendHealth(backendName, isHealthy)
 metrics.RecordBackendError(backendName, errorType, statusCode)
@@ -430,815 +209,243 @@ metrics.RecordBackendError(backendName, errorType, statusCode)
 
 **Prometheus endpoint**: `http://localhost:8080/metrics`
 
-**Key metrics**:
-- `artifusion_requests_total` - Total requests by protocol/method/status
-- `artifusion_backend_health` - Backend health (1=healthy, 0=unhealthy)
-- `artifusion_backend_latency_seconds` - Latency histogram
-- `artifusion_circuit_breaker_state` - Circuit breaker state
-- `artifusion_rate_limit_exceeded_total` - Rate limit rejections
+## Maven Backend (Reposilite 3)
 
-## Version Injection
+### Configuration Files
 
-The build system injects version information via ldflags:
+Reposilite 3 uses two configuration files:
 
-```makefile
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+1. **Local Config** (`configuration.cdn`) - Infrastructure settings
+   - Network binding, ports, database, thread pools
+   - `defaultFrontend: false` - Disable web UI (Artifusion handles auth)
 
-LDFLAGS=-ldflags "-w -s \
-    -X main.version=$(VERSION) \
-    -X main.gitCommit=$(GIT_COMMIT) \
-    -X main.buildTime=$(BUILD_TIME)"
-```
-
-**Access in code** (`cmd/artifusion/main.go`):
-```go
-var (
-    version   = "dev"
-    gitCommit = "unknown"
-    buildTime = "unknown"
-)
-```
-
-## Common Development Patterns
-
-### Adding a New Protocol Handler
-
-1. Create package in `internal/handler/<protocol>/`
-2. Implement `handler.Handler` interface
-3. Create `routes.go`, `auth.go`, `proxy.go`, `rewriter.go`
-4. Add protocol detector in `internal/detector/<protocol>.go`
-5. Wire up in `cmd/artifusion/main.go` middleware chain
-6. Add configuration struct in `internal/config/config.go`
-7. Add validation in `internal/config/validation.go`
-8. Write tests in `internal/handler/<protocol>/*_test.go`
-
-### Adding a New Middleware
-
-1. Create file in `internal/middleware/<name>.go`
-2. Implement `func(http.Handler) http.Handler` signature
-3. Add to middleware chain in `cmd/artifusion/main.go` (order matters!)
-4. Add configuration if needed in `internal/config/config.go`
-5. Write tests in `internal/middleware/<name>_test.go`
-
-### Adding Metrics
-
-1. Define metric in `internal/metrics/metrics.go`:
-   ```go
-   var myMetric = prometheus.NewCounterVec(
-       prometheus.CounterOpts{
-           Name: "artifusion_my_metric_total",
-           Help: "Description of metric",
-       },
-       []string{"label1", "label2"},
-   )
-   ```
-2. Register in `init()` function: `prometheus.MustRegister(myMetric)`
-3. Record in code: `myMetric.WithLabelValues(val1, val2).Inc()`
-
-## Deployment Considerations
-
-### Docker Image
-
-- **Multi-stage build** using Chainguard static base image
-- **Non-root user** (UID 65532)
-- **Minimal size** (~10MB final image)
-- **Build**: `make docker-build`
-
-### Health Checks
-
-- **Liveness**: `GET /health` - Returns 200 if server is running
-- **Readiness**: `GET /ready` - Returns 200 if server is ready to handle requests
-- **Metrics**: `GET /metrics` - Prometheus metrics endpoint
-
-### Reverse Proxy Setup
-
-When deploying behind Nginx/Traefik, ensure these headers are set:
-- `X-Forwarded-Host` (or `Forwarded` with host parameter)
-- `X-Forwarded-Proto` (or `Forwarded` with proto parameter)
-- `X-Forwarded-For` (client IP)
-
-**Example Nginx**:
-```nginx
-proxy_set_header X-Forwarded-Host $host;
-proxy_set_header X-Forwarded-Proto $scheme;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-```
-
-### Performance Tuning
-
-- **Connection pooling**: 200 idle connections per backend (configurable in config.yaml)
-- **Max concurrent requests**: 10,000 default (configurable via `server.max_concurrent_requests`)
-- **Rate limiting**: 1,000 req/sec global, 100 req/sec per-user (configurable)
-- **Timeouts**: 60s read, 300s write (configurable via `server.*_timeout`)
-
-### Scalability
-
-- **Stateless architecture** - Safe to run multiple instances
-- **Horizontal scaling** - Load balance across instances
-- **Shared-nothing** - No inter-instance coordination needed
-- **Cache is local** - Each instance has own auth cache (reduces GitHub API calls by ~99%)
-
-## Maven Repository Architecture (Reposilite 3)
+2. **Shared Config** (`configuration.shared.json`) - Repository definitions
+   - JSON object with domain keys: `authentication`, `statistics`, `web`, `maven`, `frontend`
+   - **CRITICAL**: Must be single JSON object, NOT an array
+   - Contains repository config with proxied upstreams
 
 ### Unified Repository Approach
 
-Artifusion uses Reposilite 3 as its Maven backend, configured with a **single unified repository** endpoint that handles both deployments and dependency resolution.
+Single repository `maven` handles both deployments and dependencies:
 
-**Configuration Method**: Reposilite 3 uses two separate configuration files for different purposes
+**Proxied Upstreams** (cascades in order):
+1. GitHub Packages (if org configured with BASIC auth)
+2. Maven Central
+3. JasperReports JFrog
+4. Spring Releases
+5. Sonatype OSS Snapshots
+6. Gradle Plugins
 
-### Configuration Architecture
+### Artifusion Routing
 
-Reposilite 3 separates configuration into two distinct files following best practices:
+Artifusion strips `path_prefix` before forwarding, so backend URL must include repository name:
 
-**1. Local Configuration** (`configuration.cdn`):
-- **Purpose**: Instance infrastructure settings (hostname, port, database, frontend, performance)
-- **Format**: CDN format (key-value pairs)
-- **Scope**: Local to the Reposilite instance, not stored in database
-- **Parameter**: `--local-configuration=/app/data/configuration.cdn`
-- **Key Settings**:
-  - `hostname: 0.0.0.0` - Network binding
-  - `port: 8080` - HTTP port
-  - `database: sqlite reposilite.db` - Database configuration
-  - `defaultFrontend: false` - **Disable web UI** (Artifusion handles all routing/auth)
-  - `webThreadPool: 16` - Web server thread pool size
-  - `ioThreadPool: 8` - I/O operations thread pool
-  - `databaseThreadPool: 1` - Database connection pool
-  - `compressionStrategy: none` - Response compression (handled by Artifusion)
-  - `idleTimeout: 30000` - Connection idle timeout (ms)
-  - `bypassExternalCache: true` - Bypass HTTP cache headers
-  - `cachedLogSize: 50` - Log cache size
-  - `debugEnabled: false` - Debug mode
-
-**2. Shared Configuration** (`configuration.shared.json`):
-- **Purpose**: Repositories, LDAP, statistics, and other features stored in database
-- **Format**: JSON object with top-level domain keys (`authentication`, `statistics`, `web`, `maven`, `frontend`)
-- **Scope**: Shared configuration stored in Reposilite's database
-- **Parameter**: `--shared-configuration=/app/data/configuration.shared.json`
-- **Contains**: Repository definitions with proxied upstreams, LDAP settings, statistics, web config, frontend metadata
-- **IMPORTANT**: The JSON structure must be a single object with domain keys, NOT an array. Incorrect format will cause Reposilite to fall back to creating default repositories (releases, snapshots, private) instead of custom repositories defined in the configuration.
-
-**Deployment Configuration**:
-
-**Docker**:
 ```yaml
-volumes:
-  - ./config/configuration.cdn:/app/configuration.cdn:ro
-  - ./config/configuration.shared.json:/app/data/configuration.shared.json:ro
-  - reposilite-data:/app/data
-environment:
-  REPOSILITE_OPTS: "--local-configuration=/app/configuration.cdn --shared-configuration=/app/data/configuration.shared.json"
-```
-
-**Kubernetes** (StatefulSet init container):
-```yaml
-initContainers:
-  - name: copy-config
-    command:
-      - sh
-      - -c
-      - |
-        mkdir -p /app/data
-        cp /config/configuration.cdn /app/data/configuration.cdn
-        cp /config/configuration.shared.json /app/data/configuration.shared.json
-env:
-  - name: REPOSILITE_OPTS
-    value: "--local-configuration=/app/data/configuration.cdn --shared-configuration=/app/data/configuration.shared.json"
-```
-
-**Why Separate Configurations?**
-- **Infrastructure vs Features**: Local config handles instance-level settings (ports, threads), shared config handles repository logic
-- **Persistence**: Shared config is stored in database and can be managed via API, local config is file-only
-- **Portability**: Shared config can be exported/imported across Reposilite instances
-- **Frontend Disable**: The `defaultFrontend: false` setting in local config disables Reposilite's web UI, as Artifusion handles all authentication and routing
-
-### Repository Structure
-
-**Single Unified Repository: `maven`**
-- **ID**: `maven`
-- **Visibility**: PUBLIC
-- **Redeployment**: Enabled (allows snapshot redeployments)
-- **Preserve Snapshots**: Enabled (keeps all snapshot versions)
-- **Storage**: Local filesystem (`/app/data/maven`)
-- **Storage Policy**: PRIORITIZE_UPSTREAM_METADATA (always fetch latest from upstreams)
-- **Proxied Upstreams**: Array of upstream repositories (searched in order)
-
-**Proxied Upstream Configurations** (in `"proxied"` array):
-1. **GitHub Packages** (if GitHub org configured)
-   - Reference: `https://maven.pkg.github.com/{ORG}/*/` (requires org in path)
-   - Authentication: BASIC auth with GitHub credentials
-     - Method: `BASIC`
-     - Login: `${GITHUB_PACKAGES_USERNAME}` (from secret/environment)
-     - Password: `${GITHUB_PACKAGES_TOKEN}` (from secret/environment)
-   - Store: true (caches artifacts locally)
-   - Use case: Private organizational artifacts
-   - Kubernetes: Credentials from `secrets.github.username` and `secrets.github.token` Helm values
-   - Docker: Set via `GITHUB_PACKAGES_USERNAME` and `GITHUB_PACKAGES_TOKEN` environment variables
-
-2. **Maven Central**
-   - Reference: `https://repo.maven.apache.org/maven2/`
-   - Store: true (caches artifacts locally)
-   - Use case: Primary public Maven repository
-
-3. **JasperReports JFrog**
-   - Reference: `https://jaspersoft.jfrog.io/jaspersoft/third-party-ce-artifacts/`
-   - Store: true (caches artifacts locally)
-   - Use case: JasperReports and third-party CE artifacts
-
-4. **Spring Releases**
-   - Reference: `https://repo.spring.io/release`
-   - Store: true (caches artifacts locally)
-   - Use case: Spring Framework libraries
-
-5. **Sonatype OSS Snapshots**
-   - Reference: `https://oss.sonatype.org/content/repositories/snapshots/`
-   - Store: true (caches artifacts locally)
-   - Use case: Open source snapshot artifacts
-
-6. **Gradle Plugins**
-   - Reference: `https://plugins.gradle.org/m2/`
-   - Store: true (caches artifacts locally)
-   - Use case: Gradle plugin dependencies
-
-### Artifusion → Reposilite Routing
-
-**How Artifusion Routes Maven Requests:**
-
-Artifusion's Maven handler strips the configured `path_prefix` before forwarding to Reposilite. To ensure Reposilite receives the correct repository path, the backend URL **must include the repository name**.
-
-**Example Request Flow:**
-```
-1. Maven Client → Artifusion
-   GET https://repo.example.com/maven/com/example/app/1.0.0/app-1.0.0.jar
-
-2. Artifusion Maven Handler
-   - Strips path_prefix (/maven)
-   - Remaining path: /com/example/app/1.0.0/app-1.0.0.jar
-
-3. Artifusion → Reposilite Backend
-   - Backend URL: http://reposilite:8080/maven  ← includes repository name!
-   - Path: /com/example/app/1.0.0/app-1.0.0.jar
-   - Final URL: http://reposilite:8080/maven/com/example/app/1.0.0/app-1.0.0.jar
-
-4. Reposilite
-   - Resolves from "maven" repository
-   - Checks local storage then cascades through proxied upstreams
-```
-
-**Configuration:**
-```yaml
-# artifusion config.yaml
 maven:
-  path_prefix: /maven         # Stripped by Artifusion before forwarding
+  path_prefix: /maven
   backend:
     url: http://reposilite:8080/maven  # Must include repository name!
 ```
 
-**Why this works:**
-- Artifusion strips `/maven` prefix → path becomes `/com/example/app/...`
-- Appends to backend URL: `http://reposilite:8080/maven` + `/com/example/app/...`
-- Reposilite receives: `/maven/com/example/app/...` which routes to the "maven" repository
-
-### Dependency Resolution Flow
-
-When a Maven client requests an artifact (`/maven/com/example/app/1.0.0/app-1.0.0.jar`):
-
-1. **Local Storage Check**: Reposilite checks the `maven` repository's local filesystem storage
-2. **Proxied Upstream Cascade**: If not found locally, Reposilite iterates through the `"proxied"` array in order:
-   - Tries GitHub Packages (if configured and authenticated)
-   - Tries Maven Central
-   - Tries JasperReports JFrog
-   - Tries Spring Releases
-   - Tries Sonatype OSS Snapshots
-   - Tries Gradle Plugins
-   - Stops at first successful response
-3. **Local Caching**: On successful upstream fetch, artifact is stored locally (`"store": true`)
-4. **Response**: Artifact is served to the client
-5. **Subsequent Requests**: Cached artifacts served directly from local storage (unless storage policy forces upstream check for metadata)
-
-### Client Configuration
-
-**Single Repository URL**: Clients configure one endpoint for both deployments and dependencies
-
-```xml
-<!-- pom.xml -->
-<project>
-  <!-- Deployment configuration -->
-  <distributionManagement>
-    <repository>
-      <id>artifusion</id>
-      <url>https://repo.example.com/maven</url>
-    </repository>
-    <snapshotRepository>
-      <id>artifusion-snapshots</id>
-      <url>https://repo.example.com/maven</url>
-    </snapshotRepository>
-  </distributionManagement>
-
-  <!-- Dependency resolution -->
-  <repositories>
-    <repository>
-      <id>artifusion</id>
-      <url>https://repo.example.com/maven</url>
-      <snapshots>
-        <enabled>true</enabled>
-      </snapshots>
-      <releases>
-        <enabled>true</enabled>
-      </releases>
-    </repository>
-  </repositories>
-</project>
+Request flow:
+```
+GET /maven/com/example/app/1.0.0/app-1.0.0.jar
+→ Strip prefix: /com/example/app/1.0.0/app-1.0.0.jar
+→ Append to backend: http://reposilite:8080/maven/com/example/app/1.0.0/app-1.0.0.jar
 ```
 
-**Gradle configuration**:
-```gradle
-repositories {
-    maven {
-        url = uri("https://repo.example.com/maven")
-        credentials {
-            username = System.getenv("GITHUB_USERNAME")
-            password = System.getenv("GITHUB_TOKEN")
-        }
-    }
-}
-
-publishing {
-    repositories {
-        maven {
-            url = uri("https://repo.example.com/maven")
-            credentials {
-                username = System.getenv("GITHUB_USERNAME")
-                password = System.getenv("GITHUB_TOKEN")
-            }
-        }
-    }
-}
-```
-
-### Deployment Configuration
-
-**Docker Compose** (`deployments/docker/docker-compose.yml`):
-```yaml
-reposilite:
-  image: dzikoysk/reposilite:latest
-  volumes:
-    - ./config/configuration.shared.json:/app/data/configuration.shared.json:ro
-    - reposilite-data:/app/data
-  environment:
-    REPOSILITE_OPTS: "--shared-configuration=/app/data/configuration.shared.json"
-    GITHUB_PACKAGES_USERNAME: ${GITHUB_PACKAGES_USERNAME}
-    GITHUB_PACKAGES_TOKEN: ${GITHUB_PACKAGES_TOKEN}
-```
-
-Set these in your `.env` file or environment:
-```bash
-GITHUB_PACKAGES_USERNAME=your-github-username
-GITHUB_PACKAGES_TOKEN=ghp_your_personal_access_token
-```
-
-**Kubernetes/Helm** (`deployments/helm/artifusion`):
-- ConfigMap: `templates/reposilite/configmap.yaml` contains `configuration.shared.json`
-- StatefulSet: `templates/reposilite/statefulset.yaml` mounts config and passes `--shared-configuration`
-- Init container copies JSON to persistent volume
-- Environment variable `REPOSILITE_OPTS` passes parameter to Reposilite
-
-### Benefits of Unified Approach
-
-1. **Simplified Client Configuration**: Single URL for all Maven operations
-2. **Transparent Caching**: All proxied artifacts cached locally with `"store": true`
-3. **Automatic Fallback**: Cascading through multiple upstreams for resilience
-4. **Centralized Management**: One repository with array of proxied upstreams
-5. **Snapshot Support**: Both releases and snapshots supported in single endpoint
-6. **Storage Policy**: `PRIORITIZE_UPSTREAM_METADATA` ensures latest versions from upstreams
-
-### Configuration File Structure
-
-The `configuration.shared.json` uses a **single JSON object** with top-level domain keys:
-
-```json
-{
-  "authentication": {
-    "ldap": {
-      "enabled": false
-    }
-  },
-  "statistics": {
-    "enabled": true,
-    "resolvedRequestsInterval": "MONTHLY"
-  },
-  "web": {
-    "forwardedIp": "X-Forwarded-For"
-  },
-  "maven": {
-    "repositories": [
-      {
-        "id": "maven",
-        "visibility": "PUBLIC",
-        "redeployment": true,
-        "preserveSnapshots": true,
-        "storageProvider": {
-          "type": "fs",
-          "quota": "100%",
-          "mount": ""
-        },
-        "storagePolicy": "PRIORITIZE_UPSTREAM_METADATA",
-        "proxied": [
-          { "reference": "https://repo.maven.apache.org/maven2/", "store": true, ... },
-          { "reference": "https://jaspersoft.jfrog.io/jaspersoft/third-party-ce-artifacts/", "store": true, ... },
-          ...
-        ]
-      }
-    ]
-  },
-  "frontend": {
-    "id": "artifusion-repository",
-    "title": "Artifusion Maven Repository",
-    "description": "Unified Maven repository with GitHub authentication"
-  }
-}
-```
-
-**CRITICAL**: The root structure must be a single JSON object with domain keys (`authentication`, `statistics`, `web`, `maven`, `frontend`), NOT an array. Using an array format will cause Reposilite to ignore the configuration and fall back to creating default repositories (releases, snapshots, private).
-
-**Key Fields**:
-- `"proxied"`: Array of upstream repository configurations (order matters - cascades in order)
-- `"reference"`: Upstream repository URL
-- `"store"`: Boolean - cache artifacts locally
-- `"allowedGroups"`: Empty array `[]` means allow all groups
-- `"allowedExtensions"`: Empty array `[]` means allow all file extensions (permissive)
-  - Alternative: Specify extensions with dot prefix (e.g., `[".jar", ".pom", ".xml"]`)
-- `"connectTimeout"`: Connection timeout in seconds
-- `"readTimeout"`: Read timeout in seconds
-- `"authorization"`: Optional authentication for private upstreams
-  - `"method"`: `"BASIC"` or `"HEADER"`
-  - For BASIC: `"login"` and `"password"` fields
-  - For HEADER: `"credentials"` object with `"headerName"` and `"headerValue"`
-
-### Configuration File Locations
+### Config Locations
 
 - **Docker**: `deployments/docker/config/configuration.shared.json`
-  - **Important**: Replace `YOUR_ORG` placeholder in GitHub Packages reference URL
-    - Example: `"https://maven.pkg.github.com/YOUR_ORG/*/"` → `"https://maven.pkg.github.com/mycompany/*/"`
-  - Set environment variables in `.env` or shell:
-    - `GITHUB_PACKAGES_USERNAME` - Your GitHub username
-    - `GITHUB_PACKAGES_TOKEN` - GitHub PAT with `read:packages` scope
+  - Replace `YOUR_ORG` in GitHub Packages URL
+  - Set `GITHUB_PACKAGES_USERNAME` and `GITHUB_PACKAGES_TOKEN` env vars
 
 - **Kubernetes**: `deployments/helm/artifusion/templates/reposilite/configmap.yaml`
-  - GitHub org automatically templated from `artifusion.config.github.required_org` Helm value
-  - Credentials injected from `secrets.github.username` and `secrets.github.token` Helm values
-  - Secret created in `templates/reposilite/secret.yaml`
-
-- **Format**: JSON object with domain keys (Reposilite 3 shared configuration format)
+  - Org automatically templated from Helm values
+  - Credentials injected from secrets
 
 ## Backend Authentication
 
-Artifusion supports authenticating to backend services (Reposilite, Verdaccio, Registry) when they require credentials. This is **separate from client authentication** where users authenticate to Artifusion with GitHub PATs.
-
-### Authentication Flow
+Backend auth is **separate** from client auth (GitHub PATs).
 
 ```
-Client → [GitHub PAT] → Artifusion → [Backend Auth] → Backend Service
+Client → [GitHub PAT] → Artifusion → [Backend Auth] → Backend
 ```
 
-- **Client → Artifusion**: GitHub PAT authentication (client_auth)
-- **Artifusion → Backend**: Backend authentication (backend.auth) - documented here
+### Supported Types
 
-### Supported Authentication Types
-
-Artifusion supports three authentication methods for backend services:
-
-#### 1. Basic Authentication
-Username and password authentication (HTTP Basic Auth).
-
-**Use case**: Reposilite, Verdaccio with basic auth enabled
-
-**Configuration**:
+**1. Basic Auth**:
 ```yaml
-# Helm values.yaml
-artifusion:
-  config:
-    protocols:
-      maven:
-        backend:
-          name: reposilite
-          url: http://reposilite:8080/maven
-          auth:
-            type: basic
-            username: admin
-            password: admin123
+backend:
+  auth:
+    type: basic
+    username: admin
+    password: ${REPOSILITE_ADMIN_TOKEN}  # From environment variable
 ```
 
-```yaml
-# config.yaml
-protocols:
-  maven:
-    backend:
-      name: reposilite
-      url: http://reposilite:8080/maven
-      auth:
-        type: basic
-        username: admin
-        password: admin123
-```
-
-#### 2. Bearer Token Authentication
-Token-based authentication (Authorization: Bearer header).
-
-**Use case**: APIs requiring bearer tokens
-
-**Configuration**:
+**2. Bearer Token**:
 ```yaml
 backend:
   auth:
     type: bearer
-    token: your-bearer-token-here
+    token: your-token
 ```
 
-#### 3. Custom Header Authentication
-Custom HTTP header authentication.
-
-**Use case**: APIs with custom authentication headers (e.g., X-API-Key)
-
-**Configuration**:
+**3. Custom Header**:
 ```yaml
 backend:
   auth:
     type: header
     header_name: X-API-Key
-    header_value: your-api-key-here
+    header_value: your-key
 ```
 
-### When to Use Backend Authentication
+### Helm Chart Auto-Generated Secrets
 
-**Use backend auth when**:
-- Backend service requires authentication (e.g., Reposilite with `--token` configured)
-- Backend is exposed outside the cluster and needs protection
-- Compliance requires authenticated backend connections
+The Helm chart automatically generates secure random admin token for Reposilite:
+- Generates 32-char token on first install
+- Preserves token on upgrades
+- Injects as `REPOSILITE_ADMIN_TOKEN` environment variable
+- No manual configuration needed!
 
-**Skip backend auth when**:
-- Backend service is on private network with no authentication
-- Backend trusts all requests from Artifusion pods (default setup)
-- Using NetworkPolicy for pod-level access control
-
-### Configuration Examples
-
-#### Maven Backend (Reposilite)
-
-**Local/Development** (no auth):
-```yaml
-maven:
-  backend:
-    name: reposilite
-    url: http://reposilite:8080/maven
-    # No auth - backend on private network
-```
-
-**Production** (with environment variable):
-```yaml
-maven:
-  backend:
-    name: reposilite
-    url: http://reposilite:8080/maven
-    auth:
-      type: basic
-      username: admin
-      password: ${REPOSILITE_ADMIN_TOKEN}  # Expanded from environment variable
-```
-
-**How it works**:
-- Config uses `${ENV_VAR}` syntax for credentials
-- Artifusion expands variables via `os.ExpandEnv()` during config loading
-- Kubernetes injects env vars from secrets at runtime
-- Keeps config.yaml read-only and secrets secure
-
-#### NPM Backend (Verdaccio)
-
-```yaml
-npm:
-  backend:
-    name: verdaccio
-    url: http://verdaccio:4873
-    auth:
-      type: basic
-      username: npm-user
-      password: npm-password
-```
-
-#### OCI/Docker Registry Backends
-
-OCI protocol supports authentication for both pull backends (cascading) and push backend.
-
-**Pull backend with auth**:
-```yaml
-oci:
-  pull_backends:
-    - name: local-hosted
-      url: http://registry:5000
-      upstream_namespace: ""
-      scope: ["*"]
-      auth:
-        type: basic
-        username: registry-user
-        password: registry-password
-```
-
-**Push backend with auth**:
-```yaml
-oci:
-  push_backend:
-    name: local-hosted
-    url: http://registry:5000
-    auth:
-      type: basic
-      username: registry-user
-      password: registry-password
-```
-
-**Use case**: Private Docker registries requiring authentication (e.g., Harbor, GitLab Container Registry, self-hosted Docker Registry with htpasswd).
-
-### Kubernetes Secrets Integration
-
-#### Automatic Reposilite Admin Token (Helm Chart)
-
-The Helm chart **automatically generates** a secure random admin token for Reposilite backend authentication:
-
-**How it works**:
-1. On first install: Generates random 32-character token, stores in secret `artifusion-reposilite-admin`
-2. On upgrades: Preserves existing token (uses Helm `lookup` function)
-3. Injects token as `REPOSILITE_ADMIN_TOKEN` environment variable into Artifusion pod
-4. ConfigMap uses `password: ${REPOSILITE_ADMIN_TOKEN}` which is expanded at runtime
-
-**No manual configuration needed** - the chart handles everything automatically!
-
-**Retrieve the generated token**:
+Retrieve token:
 ```bash
 kubectl get secret artifusion-reposilite-admin -n <namespace> \
   -o jsonpath='{.data.admin-token}' | base64 -d
 ```
 
-**Files involved**:
-- `templates/reposilite/admin-secret.yaml` - Generates/preserves secret
-- `templates/artifusion/configmap.yaml` - Uses `${REPOSILITE_ADMIN_TOKEN}` placeholder
-- `templates/artifusion/deployment.yaml` - Injects env var from secret
+### When to Use
 
-#### Manual Secret Creation (Custom Backends)
+**Use backend auth when**:
+- Backend requires authentication
+- Backend exposed outside cluster
+- Compliance requirements
 
-For other backend services requiring authentication:
+**Skip when**:
+- Backend on private network
+- Using NetworkPolicy for access control
 
-**Create secret**:
+**Code location**: `internal/proxy/client.go:injectBackendAuth()`
+
+## Testing
+
+- 112 tests across 14 test files
+- Race detection enabled (`-race` flag)
+- Table-driven tests
+- Standard Go `testing` package only
+
 ```bash
-kubectl create secret generic backend-credentials \
-  --from-literal=backend-username=admin \
-  --from-literal=backend-password=secure-password
+make test                    # All tests
+make test-coverage           # HTML coverage report
+go test -v ./internal/auth/  # Specific package
 ```
 
-**Add environment variable to deployment**:
-```yaml
-# In templates/artifusion/deployment.yaml
-env:
-  - name: BACKEND_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        name: backend-credentials
-        key: backend-password
+Key test files:
+- `internal/auth/*_test.go` - Token validation, caching
+- `internal/config/validation_test.go` - 44 config validation scenarios
+- `internal/handler/oci/rewriter_test.go` - 41 URL rewriting cases
+
+## Development Patterns
+
+### Adding a Protocol Handler
+
+1. Create package `internal/handler/<protocol>/`
+2. Implement `handler.Handler` interface
+3. Create `routes.go`, `auth.go`, `proxy.go`, `rewriter.go`
+4. Add detector `internal/detector/<protocol>.go`
+5. Wire up in `cmd/artifusion/main.go`
+6. Add config struct in `internal/config/config.go`
+7. Add validation in `internal/config/validation.go`
+8. Write tests
+
+### Adding Middleware
+
+1. Create `internal/middleware/<name>.go`
+2. Implement `func(http.Handler) http.Handler`
+3. Add to chain in `cmd/artifusion/main.go` (order matters!)
+4. Add config if needed
+5. Write tests
+
+### Adding Metrics
+
+```go
+// Define in internal/metrics/metrics.go
+var myMetric = prometheus.NewCounterVec(
+    prometheus.CounterOpts{
+        Name: "artifusion_my_metric_total",
+        Help: "Description",
+    },
+    []string{"label1", "label2"},
+)
+
+// Register in init()
+prometheus.MustRegister(myMetric)
+
+// Record
+myMetric.WithLabelValues(val1, val2).Inc()
 ```
 
-**Reference in ConfigMap**:
-```yaml
-# In templates/artifusion/configmap.yaml
-backend:
-  auth:
-    type: basic
-    username: admin
-    password: ${BACKEND_PASSWORD}
-```
+## Deployment
 
-### Security Best Practices
+### Docker
 
-1. **Never commit credentials**: Use secrets or environment variables
-   - ✅ Helm chart auto-generates Reposilite admin token (32-char random)
-   - ✅ Uses environment variable expansion (`${VAR}` syntax)
-   - ✅ Secrets injected at runtime, never in ConfigMaps
+- Multi-stage build with Chainguard static base
+- Non-root user (UID 65532)
+- ~10MB final image
 
-2. **Use strong passwords**: Generate random passwords for backend services
-   - ✅ Reposilite uses `randAlphaNum 32` for secure token generation
-   - ✅ Tokens preserved across upgrades (lookup function)
+### Health Checks
 
-3. **Rotate credentials**: Regularly update backend passwords
-   - Delete secret and redeploy to generate new token
-   - Update backend service configuration accordingly
+- `/health` - Liveness
+- `/ready` - Readiness
+- `/metrics` - Prometheus metrics
 
-4. **Security Contexts**: All services run with restrictive security contexts
-   - ✅ `runAsNonRoot: true` for all pods
-   - ✅ `allowPrivilegeEscalation: false` for all containers
-   - ✅ `capabilities.drop: ["ALL"]` to drop all Linux capabilities
-   - ✅ Specific UIDs/FSGroups per service
+### Reverse Proxy Headers
 
-5. **NetworkPolicy**: Use Kubernetes NetworkPolicy even with auth for defense in depth
-   - ✅ Chart includes NetworkPolicy templates
-   - Restricts pod-to-pod communication
+When behind Nginx/Traefik, ensure these headers:
+- `X-Forwarded-Host`
+- `X-Forwarded-Proto`
+- `X-Forwarded-For`
 
-6. **Monitor auth failures**: Check logs for unauthorized access attempts
-   - Artifusion logs all authentication attempts with request IDs
-   - Backend services log failed auth attempts
+### Performance
 
-### Implementation Details
+- Connection pooling: 200 idle connections/host
+- Max concurrent requests: 10,000 (configurable)
+- Rate limiting: 1,000 req/sec global, 100 per-user
+- Timeouts: 60s read, 300s write
 
-**Code location**: `internal/proxy/client.go:344` - `injectBackendAuth()`
+### Scalability
 
-**How it works**:
-1. Artifusion receives client request (authenticated with GitHub PAT)
-2. Protocol handler routes to appropriate backend
-3. Proxy client checks if backend has `auth` configured
-4. If configured, injects appropriate authentication headers
-5. Proxies request to backend with injected credentials
-6. Backend validates credentials and processes request
-
-**Supported backends**:
-- ✓ OCI backends (`OCIBackendConfig.Auth`) - both pull_backends and push_backend
-- ✓ Maven backend (`MavenBackendConfig.Auth`)
-- ✓ NPM backend (`NPMBackendConfig.Auth`)
-
-### Troubleshooting
-
-**401 Unauthorized from backend**:
-```bash
-# Check Artifusion logs for auth injection
-kubectl logs -n namespace pod-name | grep "Injected backend authentication"
-
-# Test backend credentials directly
-curl -u username:password http://backend:port/
-```
-
-**Auth not being injected**:
-- Verify `auth.type` is set (not empty)
-- Verify credentials are populated (username/password, token, or header_name/header_value)
-- Check configuration is loaded: `kubectl get configmap -o yaml`
-
-**Wrong auth type**:
-- Backend returns 401 even with correct credentials
-- Verify backend expects the auth type you configured (basic, bearer, header)
-- Check backend logs for authentication errors
+- Stateless architecture - safe to run multiple instances
+- Horizontal scaling with load balancing
+- No inter-instance coordination needed
+- Local auth cache reduces GitHub API calls by ~99%
 
 ## Troubleshooting
 
 ### High Latency
-1. Check backend health: `curl http://localhost:8080/metrics | grep artifusion_backend_health`
-2. Check circuit breaker state: `grep circuit_breaker_state`
-3. Review backend latency histogram: `grep artifusion_backend_latency_seconds`
+```bash
+curl http://localhost:8080/metrics | grep artifusion_backend_health
+curl http://localhost:8080/metrics | grep circuit_breaker_state
+```
 
 ### Auth Failures
-1. Verify GitHub PAT format (must match `ghp_*`, `github_pat_*`, or `ghs_*`)
-2. Check org membership: `curl -H "Authorization: token $PAT" https://api.github.com/user/orgs`
-3. Review auth cache metrics: `grep artifusion_auth_cache`
-4. Check logs for auth errors with `requestID` for correlation
+- Verify PAT format: `ghp_*`, `github_pat_*`, or `ghs_*`
+- Check org membership: `curl -H "Authorization: token $PAT" https://api.github.com/user/orgs`
+- Review logs with `requestID` for correlation
 
 ### Rate Limiting
-1. Check current limits in config.yaml
-2. Monitor `artifusion_rate_limit_exceeded_total` metric
-3. Adjust `rate_limit.requests_per_sec` or `rate_limit.per_user_requests` if needed
+- Check `artifusion_rate_limit_exceeded_total` metric
+- Adjust `rate_limit.requests_per_sec` or `rate_limit.per_user_requests`
 
 ### Circuit Breaker Open
-1. Identify failing backend: `grep circuit_breaker_state | grep " 1"`
-2. Check backend health directly
-3. Review backend error metrics: `grep artifusion_backend_errors_total`
-4. Circuit breaker auto-recovers after timeout - monitor transition to half-open (2) then closed (0)
-
-## External Dependencies
-
-### Core Libraries
-- **github.com/go-chi/chi/v5** - HTTP router and middleware framework
-- **github.com/rs/zerolog** - Structured logging
-- **github.com/spf13/viper** - Configuration management
-- **github.com/prometheus/client_golang** - Prometheus metrics
-- **github.com/google/go-github/v58** - GitHub API client
-- **golang.org/x/oauth2** - OAuth2 support for GitHub API
-- **github.com/sony/gobreaker** - Circuit breaker implementation
-- **golang.org/x/time/rate** - Rate limiting (token bucket)
-- **github.com/patrickmn/go-cache** - In-memory cache with TTL
-- **github.com/google/uuid** - UUID generation for request IDs
-- **golang.org/x/sync/singleflight** - Duplicate request suppression
-
-All dependencies are security-audited and actively maintained.
+- Identify failing backend: `grep circuit_breaker_state | grep " 1"`
+- Check backend health directly
+- Auto-recovers after timeout period
 
 ## Additional Documentation
 
-- **Architecture**: `docs/architecture/FINAL_ARCHITECTURE_SUMMARY.md` - Comprehensive system design
-- **Configuration**: `config/config.example.yaml` - Fully commented config reference
-- **Protocol Details**: `docs/PROTOCOL_BACKEND_TYPES.md` - Backend type specifications
-- **Deployment**: `deployments/docker/README.md` - Docker Compose deployment guide
-- **Migration**: `docs/CONFIG_MIGRATION.md` - Configuration migration guide
-
-## Development Workflow
-
-1. **Make changes** to code
-2. **Run tests**: `make test` (always run with race detection)
-3. **Check formatting**: `make lint`
-4. **Build binary**: `make build`
-5. **Test locally**: `make run` (requires config.yaml)
-6. **Run full CI**: `make ci` (lint + test + build)
-7. **Docker testing**: `make docker-build && make docker-up`
-8. **Check metrics**: `curl http://localhost:8080/metrics`
-9. **View logs**: `docker-compose logs -f artifusion` or check console output
+- **Architecture**: `docs/architecture/FINAL_ARCHITECTURE_SUMMARY.md`
+- **Configuration**: `config/config.example.yaml`
+- **Protocol Details**: `docs/PROTOCOL_BACKEND_TYPES.md`
+- **Deployment**: `deployments/docker/README.md`
+- **Migration**: `docs/CONFIG_MIGRATION.md`
