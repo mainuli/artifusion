@@ -424,13 +424,18 @@ Invalid token formats are rejected immediately (<1ms) without GitHub API calls, 
 ### Security Features
 
 - ✅ **Preemptive token validation** - Invalid formats rejected before API calls
-- ✅ Token hashing - Never stores plaintext tokens
+- ✅ **Token hashing** - Never stores plaintext tokens (SHA256)
 - ✅ **Multi-token support** - PATs and GitHub Actions tokens
-- ✅ Security headers - HSTS, CSP, X-Frame-Options, etc.
-- ✅ Non-root container - Runs as UID 65532
-- ✅ Structured errors - No information leakage
-- ✅ Rate limiting - Global and per-user protection
-- ✅ Request timeout - Prevents resource exhaustion
+- ✅ **Security headers** - HSTS, CSP, X-Frame-Options, etc.
+- ✅ **Non-root containers** - All services run as non-root (Artifusion: UID 65532, Backends: UIDs 1000/10001)
+- ✅ **Restrictive security contexts** - `allowPrivilegeEscalation: false`, capabilities dropped
+- ✅ **Auto-generated secrets** - Helm chart auto-generates 32-char random admin tokens
+- ✅ **Environment variable expansion** - Secrets injected at runtime via `${VAR}` syntax
+- ✅ **Read-only config** - ConfigMaps are read-only, secrets injected via env vars
+- ✅ **Structured errors** - No information leakage
+- ✅ **Rate limiting** - Global and per-user protection
+- ✅ **Request timeout** - Prevents resource exhaustion
+- ✅ **Network policies** - Pod-to-pod communication restrictions (optional)
 
 ---
 

@@ -23,6 +23,8 @@ spec:
         {{- include "artifusion.imagePullSecrets" . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.reposilite.podSecurityContext | nindent 8 }}
       initContainers:
         - name: copy-config
           image: cgr.dev/chainguard/busybox:latest
@@ -43,6 +45,8 @@ spec:
               mountPath: /app/data
       containers:
         - name: reposilite
+          securityContext:
+            {{- toYaml .Values.reposilite.securityContext | nindent 12 }}
           image: {{ include "artifusion.reposilite.image" . }}
           imagePullPolicy: {{ .Values.reposilite.image.pullPolicy }}
           ports:
@@ -50,8 +54,13 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
+            - name: REPOSILITE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifusion.reposilite.serviceName" . }}-admin
+                  key: admin-token
             - name: REPOSILITE_OPTS
-              value: "--local-configuration=/app/data/configuration.cdn --shared-configuration=/app/data/configuration.shared.json --token admin:admin123"
+              value: "--local-configuration=/app/data/configuration.cdn --shared-configuration=/app/data/configuration.shared.json --token admin:$(REPOSILITE_ADMIN_TOKEN)"
             - name: GITHUB_PACKAGES_USERNAME
               valueFrom:
                 secretKeyRef:

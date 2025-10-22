@@ -39,6 +39,16 @@ ociRegistry:
       cpu: 200m
       memory: 512Mi
 
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
 registry:
   storage:
     size: 1Gi
@@ -50,6 +60,16 @@ registry:
     limits:
       cpu: 200m
       memory: 256Mi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
 
 reposilite:
   storage:
@@ -63,6 +83,16 @@ reposilite:
       cpu: 500m
       memory: 1Gi
 
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
 verdaccio:
   storage:
     size: 1Gi
@@ -74,6 +104,16 @@ verdaccio:
     limits:
       cpu: 200m
       memory: 256Mi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    fsGroup: 65533
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
 
 ingress:
   enabled: false  # Use port-forward for local dev

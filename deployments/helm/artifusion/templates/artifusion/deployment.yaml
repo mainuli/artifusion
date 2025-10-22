@@ -62,6 +62,14 @@ spec:
           env:
             - name: CONFIG_PATH
               value: /etc/artifusion/config.yaml
+            {{- if .Values.reposilite.enabled }}
+            # Reposilite backend authentication
+            - name: REPOSILITE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifusion.reposilite.serviceName" . }}-admin
+                  key: admin-token
+            {{- end }}
           livenessProbe:
             {{- toYaml .Values.artifusion.livenessProbe | nindent 12 }}
           readinessProbe:

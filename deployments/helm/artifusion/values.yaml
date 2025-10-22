@@ -303,6 +303,20 @@ ociRegistry:
       cpu: 500m
       memory: 1Gi
 
+  ## Pod security context
+  ## @param ociRegistry.podSecurityContext Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  ## Container security context
+  ## @param ociRegistry.securityContext Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
   ## Service configuration
   ## @param ociRegistry.service.type Kubernetes service type
   ## @param ociRegistry.service.port Kubernetes service port
@@ -365,6 +379,20 @@ registry:
       cpu: 500m
       memory: 512Mi
 
+  ## Pod security context
+  ## @param registry.podSecurityContext Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  ## Container security context
+  ## @param registry.securityContext Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
   ## Service configuration
   ## @param registry.service.type Kubernetes service type
   ## @param registry.service.port Kubernetes service port
@@ -413,6 +441,20 @@ reposilite:
       cpu: 1000m
       memory: 2Gi
 
+  ## Pod security context
+  ## @param reposilite.podSecurityContext Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  ## Container security context
+  ## @param reposilite.securityContext Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
   ## Service configuration
   ## @param reposilite.service.type Kubernetes service type
   ## @param reposilite.service.port Kubernetes service port
@@ -459,6 +501,20 @@ verdaccio:
     limits:
       cpu: 500m
       memory: 512Mi
+
+  ## Pod security context
+  ## @param verdaccio.podSecurityContext Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    fsGroup: 65533
+
+  ## Container security context
+  ## @param verdaccio.securityContext Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
 
   ## Service configuration
   ## @param verdaccio.service.type Kubernetes service type

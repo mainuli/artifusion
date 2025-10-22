@@ -26,8 +26,12 @@ spec:
         {{- include "artifusion.imagePullSecrets" . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "artifusion.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.ociRegistry.podSecurityContext | nindent 8 }}
       containers:
         - name: oci-registry
+          securityContext:
+            {{- toYaml .Values.ociRegistry.securityContext | nindent 12 }}
           image: {{ include "artifusion.ociRegistry.image" . }}
           imagePullPolicy: {{ .Values.ociRegistry.image.pullPolicy }}
           args:

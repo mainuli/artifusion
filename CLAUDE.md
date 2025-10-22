@@ -995,7 +995,7 @@ maven:
     # No auth - backend on private network
 ```
 
-**Production** (with auth):
+**Production** (with environment variable):
 ```yaml
 maven:
   backend:
@@ -1004,8 +1004,14 @@ maven:
     auth:
       type: basic
       username: admin
-      password: ${REPOSILITE_PASSWORD}  # From secret
+      password: ${REPOSILITE_ADMIN_TOKEN}  # Expanded from environment variable
 ```
+
+**How it works**:
+- Config uses `${ENV_VAR}` syntax for credentials
+- Artifusion expands variables via `os.ExpandEnv()` during config loading
+- Kubernetes injects env vars from secrets at runtime
+- Keeps config.yaml read-only and secrets secure
 
 #### NPM Backend (Verdaccio)
 
@@ -1054,31 +1060,89 @@ oci:
 
 ### Kubernetes Secrets Integration
 
-For production deployments, store credentials in Kubernetes secrets:
+#### Automatic Reposilite Admin Token (Helm Chart)
+
+The Helm chart **automatically generates** a secure random admin token for Reposilite backend authentication:
+
+**How it works**:
+1. On first install: Generates random 32-character token, stores in secret `artifusion-reposilite-admin`
+2. On upgrades: Preserves existing token (uses Helm `lookup` function)
+3. Injects token as `REPOSILITE_ADMIN_TOKEN` environment variable into Artifusion pod
+4. ConfigMap uses `password: ${REPOSILITE_ADMIN_TOKEN}` which is expanded at runtime
+
+**No manual configuration needed** - the chart handles everything automatically!
+
+**Retrieve the generated token**:
+```bash
+kubectl get secret artifusion-reposilite-admin -n <namespace> \
+  -o jsonpath='{.data.admin-token}' | base64 -d
+```
+
+**Files involved**:
+- `templates/reposilite/admin-secret.yaml` - Generates/preserves secret
+- `templates/artifusion/configmap.yaml` - Uses `${REPOSILITE_ADMIN_TOKEN}` placeholder
+- `templates/artifusion/deployment.yaml` - Injects env var from secret
+
+#### Manual Secret Creation (Custom Backends)
+
+For other backend services requiring authentication:
 
 **Create secret**:
 ```bash
 kubectl create secret generic backend-credentials \
-  --from-literal=reposilite-username=admin \
-  --from-literal=reposilite-password=secure-password
+  --from-literal=backend-username=admin \
+  --from-literal=backend-password=secure-password
 ```
 
-**Reference in Helm values**:
+**Add environment variable to deployment**:
 ```yaml
-# Use valueFrom to inject from secrets (requires custom templating)
-# Or pass as Helm values:
-helm install artifusion ./artifusion \
-  --set artifusion.config.protocols.maven.backend.auth.username=admin \
-  --set artifusion.config.protocols.maven.backend.auth.password=secure-password
+# In templates/artifusion/deployment.yaml
+env:
+  - name: BACKEND_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: backend-credentials
+        key: backend-password
+```
+
+**Reference in ConfigMap**:
+```yaml
+# In templates/artifusion/configmap.yaml
+backend:
+  auth:
+    type: basic
+    username: admin
+    password: ${BACKEND_PASSWORD}
 ```
 
 ### Security Best Practices
 
 1. **Never commit credentials**: Use secrets or environment variables
+   - ✅ Helm chart auto-generates Reposilite admin token (32-char random)
+   - ✅ Uses environment variable expansion (`${VAR}` syntax)
+   - ✅ Secrets injected at runtime, never in ConfigMaps
+
 2. **Use strong passwords**: Generate random passwords for backend services
+   - ✅ Reposilite uses `randAlphaNum 32` for secure token generation
+   - ✅ Tokens preserved across upgrades (lookup function)
+
 3. **Rotate credentials**: Regularly update backend passwords
-4. **NetworkPolicy**: Use Kubernetes NetworkPolicy even with auth for defense in depth
-5. **Monitor auth failures**: Check logs for unauthorized access attempts
+   - Delete secret and redeploy to generate new token
+   - Update backend service configuration accordingly
+
+4. **Security Contexts**: All services run with restrictive security contexts
+   - ✅ `runAsNonRoot: true` for all pods
+   - ✅ `allowPrivilegeEscalation: false` for all containers
+   - ✅ `capabilities.drop: ["ALL"]` to drop all Linux capabilities
+   - ✅ Specific UIDs/FSGroups per service
+
+5. **NetworkPolicy**: Use Kubernetes NetworkPolicy even with auth for defense in depth
+   - ✅ Chart includes NetworkPolicy templates
+   - Restricts pod-to-pod communication
+
+6. **Monitor auth failures**: Check logs for unauthorized access attempts
+   - Artifusion logs all authentication attempts with request IDs
+   - Backend services log failed auth attempts
 
 ### Implementation Details
 

@@ -59,10 +59,9 @@ artifusion:
         backend:
           name: "reposilite"
           url: "http://artifusion-reposilite:8080/maven"  # Backend repository name (must match Reposilite config)
-          auth:
-            type: "basic"
-            username: "admin"
-            password: "admin123"
+          # Note: Backend auth uses auto-generated admin token from secret
+          # The Helm chart automatically injects the token at deployment time
+          # No configuration needed - handled automatically by templates
 
       # NPM - uses /npm path prefix
       npm:
@@ -120,6 +119,16 @@ ociRegistry:
       cpu: 200m
       memory: 512Mi
 
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
 # Local hosted registry for push operations
 registry:
   enabled: true
@@ -134,6 +143,16 @@ registry:
     limits:
       cpu: 200m
       memory: 256Mi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
 
 # Maven repository (Reposilite)
 reposilite:
@@ -150,6 +169,16 @@ reposilite:
       cpu: 500m
       memory: 1Gi
 
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
 # NPM registry cache (Verdaccio)
 verdaccio:
   enabled: true
@@ -164,6 +193,16 @@ verdaccio:
     limits:
       cpu: 200m
       memory: 256Mi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    fsGroup: 65533
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
 
 # Ingress configuration for lvh.me
 ingress:

@@ -14,6 +14,7 @@ keywords:
   - reverse-proxy
   - artifact-management
 home: https://github.com/mainuli/artifusion
+icon: https://raw.githubusercontent.com/mainuli/artifusion/main/docs/artifusion-icon.svg
 sources:
   - https://github.com/mainuli/artifusion
 maintainers:

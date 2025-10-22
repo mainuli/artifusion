@@ -65,9 +65,12 @@ data:
         backend:
           name: "reposilite"
           url: "http://{{ include "artifusion.reposilite.serviceName" . }}:8080/maven"
-          {{- if .Values.artifusion.config.protocols.maven.backend.auth }}
+          {{- if .Values.reposilite.enabled }}
+          # Backend auth credentials injected from environment variables
           auth:
-            {{- .Values.artifusion.config.protocols.maven.backend.auth | toYaml | nindent 12 }}
+            type: "basic"
+            username: "admin"
+            password: "${REPOSILITE_ADMIN_TOKEN}"
           {{- end }}
 
       npm:
