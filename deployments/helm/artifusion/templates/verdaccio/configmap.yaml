@@ -32,12 +32,11 @@ data:
       github:
         url: https://npm.pkg.github.com/
         timeout: 30s
-        max_age: 30m
-        fail_timeout: 5m
-        maxage: 30m
+        cache: true
+        maxage: 5m
         auth:
           type: bearer
-          token_env: true
+          token_env: NPM_TOKEN
         headers:
           Accept: "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*"
         agent_options:
@@ -50,9 +49,8 @@ data:
       npmjs:
         url: https://registry.npmjs.org/
         timeout: 30s
-        max_age: 2h
-        fail_timeout: 10m
-        maxage: 2h
+        cache: true
+        maxage: 1h
         headers:
           Accept: "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*"
         agent_options:
@@ -65,12 +63,12 @@ data:
     packages:
       {{- if .Values.artifusion.config.github.required_org }}
       # Scoped packages from GitHub organization
+      # Authentication is handled by Artifusion, so Verdaccio trusts all requests
       '@{{ .Values.artifusion.config.github.required_org }}/*':
-        # Allow all operations - no authentication required
         access: $all
         publish: $all
         unpublish: $all
-        proxy: github npmjs
+        proxy: github
       {{- end }}
 
       # All scoped packages (e.g., @myorg/package)
