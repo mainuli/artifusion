@@ -4,6 +4,11 @@
 artifusion:
   replicaCount: 1
 
+  image:
+    repository: artifusion
+    tag: latest
+    pullPolicy: Never
+
   config:
     logging:
       level: "debug"

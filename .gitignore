@@ -87,3 +87,6 @@ profile.cov
 # Local environment overrides
 config.local.yaml
 docker-compose.override.yml
+
+# Helm values files with credentials
+deployments/helm/artifusion/values-lvh.yaml
