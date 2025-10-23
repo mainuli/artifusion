@@ -50,9 +50,12 @@ github:
   url: https://npm.pkg.github.com/
   timeout: 30s
   max_age: 30m
+  auth:
+    type: bearer
+    token_env: true  # Uses NPM_TOKEN environment variable
 ```
 
-**Authentication**: Set `GITHUB_PACKAGES_TOKEN` in `.env` file
+**Authentication**: Set `GITHUB_PACKAGES_TOKEN` in `.env` file, which is injected as `NPM_TOKEN` environment variable in the Verdaccio container
 
 #### 2. npmjs.org
 ```yaml
